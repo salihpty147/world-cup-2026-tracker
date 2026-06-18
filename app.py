@@ -1,11 +1,98 @@
 from flask import Flask, jsonify
 from urllib.request import urlopen
-import team2 = match.get("team2", "")import json
+import json
+from html import escape
+from datetime import datetime, timedelta, timezone
 
-        if not group or not team1 or not team2:
-            continue
+app = Flask(__name__)
 
-        if "Group" not in group:
+MATCHES_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
+SQUADS_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.squads.json"
+
+
+def fetch_json(url):
+    try:
+        with urlopen(url, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as error:
+        print("API error:", error)
+        return {}
+
+
+def get_matches_from_api():
+    data = fetch_json(MATCHES_URL)
+    if isinstance(data, dict):
+        return data.get("matches", [])
+    return []
+
+
+def get_squads_from_api():
+    return fetch_json(SQUADS_URL)
+
+
+def is_completed(match):
+    return "score" in match and isinstance(match.get("score"), dict) and "ft" in match["score"]
+
+
+def get_score(match):
+    if is_completed(match):
+        score = match["score"]["ft"]
+        return f"{score[0]} - {score[1]}"
+    return "Upcoming"
+
+
+def convert_to_ist(date_text, time_text):
+    try:
+        if not time_text or "UTC" not in time_text:
+            return time_text or "TBA"
+
+        time_part, utc_part = time_text.split(" UTC")
+        match_datetime = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
+
+        offset_hours = int(utc_part)
+        source_timezone = timezone(timedelta(hours=offset_hours))
+        match_datetime = match_datetime.replace(tzinfo=source_timezone)
+
+        ist_timezone = timezone(timedelta(hours=5, minutes=30))
+        ist_datetime = match_datetime.astimezone(ist_timezone)
+
+        return ist_datetime.strftime("%d %b %Y, %I:%M %p IST")
+
+    except Exception:
+        return time_text or "TBA"
+
+
+def get_match_datetime_for_sorting(match):
+    try:
+        date_text = match.get("date", "")
+        time_text = match.get("time", "")
+
+        if not date_text or not time_text or "UTC" not in time_text:
+            return datetime.max.replace(tzinfo=timezone.utc)
+
+        time_part, utc_part = time_text.split(" UTC")
+        match_datetime = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
+
+        offset_hours = int(utc_part)
+        source_timezone = timezone(timedelta(hours=offset_hours))
+        match_datetime = match_datetime.replace(tzinfo=source_timezone)
+
+        ist_timezone = timezone(timedelta(hours=5, minutes=30))
+        return match_datetime.astimezone(ist_timezone)
+
+    except Exception:
+        return datetime.max.replace(tzinfo=timezone.utc)
+
+
+def build_points_table(matches):
+    standings = {}
+
+    for match in matches:
+        group = match.get("group", "")
+        team1 = match.get("team1", "")
+        team2 = match.get("team2", "")
+
+        if not group or not team1 or not team2 or "Group" not in group:
             continue
 
         if group not in standings:
@@ -33,18 +120,18 @@ import team2 = match.get("team2", "")import json
         team1 = match.get("team1", "")
         team2 = match.get("team2", "")
 
-        if not group or not team1 or not team2:
+        if not group or not team1 or not team2 or "Group" not in group:
             continue
 
-        if "Group" not in group:
+        if group not in standings:
             continue
 
-        if group not in standings or team1 not in standings[group] or team2 not in standings[group]:
+        if team1 not in standings[group] or team2 not in standings[group]:
             continue
 
         score = match["score"]["ft"]
-        team1_goals = score[0]
-        team2_goals = score[1]
+        team1_goals = int(score[0])
+        team2_goals = int(score[1])
 
         standings[group][team1]["played"] += 1
         standings[group][team2]["played"] += 1
@@ -77,7 +164,7 @@ import team2 = match.get("team2", "")import json
     for group, teams in standings.items():
         sorted_standings[group] = sorted(
             teams.values(),
-            key=lambda x: (x["points"], x["gd"], x["gf"]),
+            key=lambda x: (x["points"], x["gd"], x["gf"], x["team"]),
             reverse=True
         )
 
@@ -96,7 +183,11 @@ def build_top_scorers(matches):
             key = f"{player_name}_{team1}"
 
             if key not in scorers:
-                scorers[key] = {"player": player_name, "team": team1, "goals": 0}
+                scorers[key] = {
+                    "player": player_name,
+                    "team": team1,
+                    "goals": 0
+                }
 
             scorers[key]["goals"] += 1
 
@@ -105,7 +196,11 @@ def build_top_scorers(matches):
             key = f"{player_name}_{team2}"
 
             if key not in scorers:
-                scorers[key] = {"player": player_name, "team": team2, "goals": 0}
+                scorers[key] = {
+                    "player": player_name,
+                    "team": team2,
+                    "goals": 0
+                }
 
             scorers[key]["goals"] += 1
 
@@ -127,7 +222,10 @@ def normalize_squads(raw_data):
         else:
             squad_items = []
             for team_name, players in raw_data.items():
-                squad_items.append({"team": team_name, "players": players})
+                squad_items.append({
+                    "team": team_name,
+                    "players": players
+                })
     elif isinstance(raw_data, list):
         squad_items = raw_data
     else:
@@ -145,7 +243,13 @@ def normalize_squads(raw_data):
             or "Unknown Team"
         )
 
-        players = item.get("players") or item.get("squad") or item.get("roster") or []
+        players = (
+            item.get("players")
+            or item.get("squad")
+            or item.get("roster")
+            or []
+        )
+
         normalized_players = []
 
         if isinstance(players, list):
@@ -168,6 +272,40 @@ def normalize_squads(raw_data):
     return squads
 
 
+def build_match_rows(matches, include_score=False, include_round=False, include_status=False):
+    rows = ""
+
+    for match in matches:
+        status = "Completed" if is_completed(match) else "Upcoming"
+
+        round_td = ""
+        if include_round:
+            round_td = f"<td>{escape(match.get('round', ''))}</td>"
+
+        score_td = ""
+        if include_score:
+            score_td = f"<td><span class='score-badge'>{escape(get_score(match))}</span></td>"
+
+        status_td = ""
+        if include_status:
+            status_td = f"<td>{escape(status)}</td>"
+
+        rows += f"""
+        <tr>
+            {round_td}
+            <td>{escape(match.get('date', ''))}</td>
+            <td>{escape(convert_to_ist(match.get('date', ''), match.get('time', '')))}</td>
+            <td><span class="group-badge">{escape(match.get('group', ''))}</span></td>
+            <td>{escape(match.get('team1', ''))} vs {escape(match.get('team2', ''))}</td>
+            {score_td}
+            {status_td}
+            <td>{escape(match.get('ground', ''))}</td>
+        </tr>
+        """
+
+    return rows
+
+
 @app.route("/")
 def home():
     return world_cup_tracker()
@@ -176,7 +314,11 @@ def home():
 @app.route("/world-cup-2026")
 def world_cup_tracker():
     matches = get_matches_from_api()
-    sorted_matches = sorted(matches, key=get_match_datetime_for_sorting)
+
+    sorted_matches = sorted(
+        matches,
+        key=get_match_datetime_for_sorting
+    )
 
     completed_matches = sorted(
         [match for match in matches if is_completed(match)],
@@ -192,49 +334,24 @@ def world_cup_tracker():
     top_scorers = build_top_scorers(matches)
     squads = normalize_squads(get_squads_from_api())
 
-    completed_rows = ""
-    for match in completed_matches:
-        completed_rows += f"""
-        <tr>
-            <td>{escape(match.get("date", ""))}</td>
-            <td>{escape(convert_to_ist(match.get("date", ""), match.get("time", "")))}</td>
-            <td><span class="group-badge">{escape(match.get("group", ""))}</span></td>
-            <td>{escape(match.get("team1", ""))} vs {escape(match.get("team2", ""))}</td>
-            <td><span class="score-badge">{escape(get_score(match))}</span></td>
-            <td>{escape(match.get("ground", ""))}</td>
-        </tr>
-        """
+    completed_rows = build_match_rows(
+        completed_matches,
+        include_score=True
+    )
 
-    upcoming_rows = ""
-    for match in upcoming_matches:
-        upcoming_rows += f"""
-        <tr>
-            <td>{escape(match.get("date", ""))}</td>
-            <td>{escape(convert_to_ist(match.get("date", ""), match.get("time", "")))}</td>
-            <td><span class="group-badge">{escape(match.get("group", ""))}</span></td>
-            <td>{escape(match.get("team1", ""))} vs {escape(match.get("team2", ""))}</td>
-            <td>{escape(match.get("ground", ""))}</td>
-        </tr>
-        """
+    upcoming_rows = build_match_rows(
+        upcoming_matches
+    )
 
-    all_fixtures_rows = ""
-    for match in sorted_matches:
-        status = "Completed" if is_completed(match) else "Upcoming"
-
-        all_fixtures_rows += f"""
-        <tr>
-            <td>{escape(match.get("round", ""))}</td>
-            <td>{escape(match.get("date", ""))}</td>
-            <td>{escape(convert_to_ist(match.get("date", ""), match.get("time", "")))}</td>
-            <td><span class="group-badge">{escape(match.get("group", ""))}</span></td>
-            <td>{escape(match.get("team1", ""))} vs {escape(match.get("team2", ""))}</td>
-            <td>{escape(get_score(match))}</td>
-            <td>{escape(status)}</td>
-            <td>{escape(match.get("ground", ""))}</td>
-        </tr>
-        """
+    all_fixtures_rows = build_match_rows(
+        sorted_matches,
+        include_score=True,
+        include_round=True,
+        include_status=True
+    )
 
     points_html = ""
+
     for group in sorted(standings.keys()):
         points_html += f"""
         <h3 class="group-title">{escape(group)}</h3>
@@ -253,39 +370,35 @@ def world_cup_tracker():
             </tr>
         """
 
-        position = 1
-        for team in standings[group]:
+        for position, team in enumerate(standings[group], start=1):
             points_html += f"""
             <tr>
                 <td>{position}</td>
-                <td>{escape(team["team"])}</td>
-                <td>{team["played"]}</td>
-                <td>{team["won"]}</td>
-                <td>{team["drawn"]}</td>
-                <td>{team["lost"]}</td>
-                <td>{team["gf"]}</td>
-                <td>{team["ga"]}</td>
-                <td>{team["gd"]}</td>
-                <td><span class="points-badge">{team["points"]}</span></td>
+                <td>{escape(team['team'])}</td>
+                <td>{team['played']}</td>
+                <td>{team['won']}</td>
+                <td>{team['drawn']}</td>
+                <td>{team['lost']}</td>
+                <td>{team['gf']}</td>
+                <td>{team['ga']}</td>
+                <td>{team['gd']}</td>
+                <td><span class="points-badge">{team['points']}</span></td>
             </tr>
             """
-            position += 1
 
         points_html += "</table>"
 
     top_scorers_rows = ""
-    rank = 1
 
-    for scorer in top_scorers:
+    for rank, scorer in enumerate(top_scorers, start=1):
         top_scorers_rows += f"""
         <tr>
             <td>{rank}</td>
-            <td>{escape(scorer["player"])}</td>
-            <td>{escape(scorer["team"])}</td>
-            <td><span class="score-badge">{scorer["goals"]}</span></td>
+            <td>{escape(scorer['player'])}</td>
+            <td>{escape(scorer['team'])}</td>
+            <td><span class="score-badge">{scorer['goals']}</span></td>
         </tr>
         """
-        rank += 1
 
     if not top_scorers_rows:
         top_scorers_rows = """
@@ -311,9 +424,9 @@ def world_cup_tracker():
             for player in squads[team_name]:
                 players_html += f"""
                 <tr>
-                    <td>{escape(str(player.get("number", "")))}</td>
-                    <td>{escape(player.get("name", ""))}</td>
-                    <td>{escape(player.get("position", ""))}</td>
+                    <td>{escape(str(player.get('number', '')))}</td>
+                    <td>{escape(player.get('name', ''))}</td>
+                    <td>{escape(player.get('position', ''))}</td>
                 </tr>
                 """
 
@@ -326,14 +439,13 @@ def world_cup_tracker():
         """
 
     lineup_html = ""
-    next_matches_for_lineup = upcoming_matches[:8]
 
-    for match in next_matches_for_lineup:
+    for match in upcoming_matches[:8]:
         lineup_html += f"""
         <div class="lineup-card">
-            <h3>{escape(match.get("team1", ""))} vs {escape(match.get("team2", ""))}</h3>
-            <p><b>Kickoff:</b> {escape(convert_to_ist(match.get("date", ""), match.get("time", "")))}</p>
-            <p><b>Venue:</b> {escape(match.get("ground", ""))}</p>
+            <h3>{escape(match.get('team1', ''))} vs {escape(match.get('team2', ''))}</h3>
+            <p><b>Kickoff:</b> {escape(convert_to_ist(match.get('date', ''), match.get('time', '')))}</p>
+            <p><b>Venue:</b> {escape(match.get('ground', ''))}</p>
 
             <div class="pitch">
                 <div class="pitch-line">Goalkeeper</div>
@@ -361,6 +473,7 @@ def world_cup_tracker():
     <html>
     <head>
         <title>FIFA World Cup 2026 Tracker</title>
+
         <style>
             body {{
                 margin: 0;
@@ -773,90 +886,3 @@ def api_squads():
 
 if __name__ == "__main__":
     app.run(debug=True)
-from html import escape
-from datetime import datetime, timedelta, timezone
-
-app = Flask(__name__)
-
-MATCHES_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
-SQUADS_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.squads.json"
-
-
-def fetch_json(url):
-    try:
-        with urlopen(url, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except Exception as error:
-        print("API error:", error)
-        return {}
-
-
-def get_matches_from_api():
-    data = fetch_json(MATCHES_URL)
-    return data.get("matches", [])
-
-
-def get_squads_from_api():
-    return fetch_json(SQUADS_URL)
-
-
-def is_completed(match):
-    return "score" in match and "ft" in match["score"]
-
-
-def get_score(match):
-    if is_completed(match):
-        score = match["score"]["ft"]
-        return f"{score[0]} - {score[1]}"
-    return "Upcoming"
-
-
-def convert_to_ist(date_text, time_text):
-    try:
-        if not time_text or "UTC" not in time_text:
-            return time_text
-
-        time_part, utc_part = time_text.split(" UTC")
-        match_datetime = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
-
-        offset_hours = int(utc_part)
-        source_timezone = timezone(timedelta(hours=offset_hours))
-        match_datetime = match_datetime.replace(tzinfo=source_timezone)
-
-        ist_timezone = timezone(timedelta(hours=5, minutes=30))
-        ist_datetime = match_datetime.astimezone(ist_timezone)
-
-        return ist_datetime.strftime("%d %b %Y, %I:%M %p IST")
-
-    except Exception:
-        return time_text
-
-
-def get_match_datetime_for_sorting(match):
-    try:
-        date_text = match.get("date", "")
-        time_text = match.get("time", "")
-
-        if not date_text or not time_text or "UTC" not in time_text:
-            return datetime.max.replace(tzinfo=timezone.utc)
-
-        time_part, utc_part = time_text.split(" UTC")
-        match_datetime = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
-
-        offset_hours = int(utc_part)
-        source_timezone = timezone(timedelta(hours=offset_hours))
-        match_datetime = match_datetime.replace(tzinfo=source_timezone)
-
-        ist_timezone = timezone(timedelta(hours=5, minutes=30))
-        return match_datetime.astimezone(ist_timezone)
-
-    except Exception:
-        return datetime.max.replace(tzinfo=timezone.utc)
-
-
-def build_points_table(matches):
-    standings = {}
-
-    for match in matches:
-        group = match.get("group", "")
-        team1 = match.get("team1", "")
