@@ -17,6 +17,7 @@ GOOGLE_ANALYTICS_TAG = """
 </script>
 """
 
+
 @app.after_request
 def add_google_analytics(response):
     if response.content_type and "text/html" in response.content_type:
@@ -25,6 +26,7 @@ def add_google_analytics(response):
             html = html.replace("</head>", GOOGLE_ANALYTICS_TAG + "\n</head>")
             response.set_data(html)
     return response
+
 
 MATCHES_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
 SQUADS_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.squads.json"
@@ -44,14 +46,17 @@ COUNTRY_CODES = {
     "Côte d'Ivoire": "ci", "Jordan": "jo", "Algeria": "dz"
 }
 
+
 def flag_img(team):
     code = COUNTRY_CODES.get(team)
     if not code:
         return ""
     return f'<img class="team-flag" src="https://flagcdn.com/24x18/{code}.png" alt="{escape(team)} flag" loading="lazy">'
 
+
 def team_label(team):
     return f'{flag_img(team)}<span>{escape(team)}</span>'
+
 
 def fetch_json(url):
     try:
@@ -61,15 +66,19 @@ def fetch_json(url):
         print("Data fetch error:", error)
         return {}
 
+
 def get_matches():
     data = fetch_json(MATCHES_URL)
     return data.get("matches", []) if isinstance(data, dict) else []
 
+
 def get_squads_raw():
     return fetch_json(SQUADS_URL)
 
+
 def completed(match):
     return isinstance(match.get("score"), dict) and "ft" in match["score"]
+
 
 def score_text(match):
     if completed(match):
@@ -77,39 +86,53 @@ def score_text(match):
         return f"{score[0]} - {score[1]}"
     return "Upcoming"
 
+
 def match_datetime(match):
     try:
         date_text = match.get("date", "")
         time_text = match.get("time", "")
+
         if not date_text or not time_text or "UTC" not in time_text:
             return None
+
         time_part, offset_part = time_text.split(" UTC")
         local_dt = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
         local_tz = timezone(timedelta(hours=int(offset_part)))
+
         return local_dt.replace(tzinfo=local_tz)
+
     except Exception:
         return None
+
 
 def sort_key(match):
     dt = match_datetime(match)
     return dt or datetime.max.replace(tzinfo=timezone.utc)
 
+
 def time_in_zone(match, hour_offset, suffix):
     dt = match_datetime(match)
+
     if not dt:
         return "TBA"
+
     target_dt = dt.astimezone(timezone(timedelta(hours=hour_offset)))
     return target_dt.strftime(f"%d %b, %I:%M %p {suffix}")
 
+
 def ist_text(match):
     dt = match_datetime(match)
+
     if not dt:
         return "TBA"
+
     return dt.astimezone(IST).strftime("%d %b, %I:%M %p IST")
+
 
 def ist_date(match):
     dt = match_datetime(match)
     return dt.astimezone(IST).date() if dt else None
+
 
 def gcc_times_html(match):
     return f"""
@@ -121,50 +144,82 @@ def gcc_times_html(match):
     <div class="match-info"><span>Bahrain</span><b>{escape(time_in_zone(match, 3, 'BHR'))}</b></div>
     """
 
+
 def goal_scorer_text(match):
     items = []
+
     for goals_key, team_key in [("goals1", "team1"), ("goals2", "team2")]:
         team = match.get(team_key, "")
+
         for goal in match.get(goals_key, []):
             name = goal.get("name", "Unknown")
             minute = goal.get("minute", "")
             penalty = " pen" if goal.get("penalty") else ""
             items.append(f"{name} ({team}, {minute}'{penalty})")
+
     return "; ".join(items) if items else "Goal scorer details not available"
+
 
 def build_top_scorers(matches):
     scorers = {}
+
     for match in matches:
         for goals_key, team_key in [("goals1", "team1"), ("goals2", "team2")]:
             team = match.get(team_key, "")
+
             for goal in match.get(goals_key, []):
                 player = goal.get("name", "Unknown")
                 key = f"{player}|{team}"
-                scorers.setdefault(key, {"player": player, "team": team, "goals": 0})
+
+                scorers.setdefault(key, {
+                    "player": player,
+                    "team": team,
+                    "goals": 0
+                })
+
                 scorers[key]["goals"] += 1
-    return sorted(scorers.values(), key=lambda x: (x["goals"], x["player"]), reverse=True)
+
+    return sorted(
+        scorers.values(),
+        key=lambda x: (x["goals"], x["player"]),
+        reverse=True
+    )
+
 
 def build_points_table(matches):
     table = {}
+
     for match in matches:
         group = match.get("group", "")
         team1 = match.get("team1", "")
         team2 = match.get("team2", "")
+
         if not group or "Group" not in group or not team1 or not team2:
             continue
+
         table.setdefault(group, {})
+
         for team in [team1, team2]:
             table[group].setdefault(team, {
-                "team": team, "played": 0, "won": 0, "drawn": 0, "lost": 0,
-                "gf": 0, "ga": 0, "gd": 0, "points": 0
+                "team": team,
+                "played": 0,
+                "won": 0,
+                "drawn": 0,
+                "lost": 0,
+                "gf": 0,
+                "ga": 0,
+                "gd": 0,
+                "points": 0
             })
 
     for match in matches:
         if not completed(match):
             continue
+
         group = match.get("group", "")
         team1 = match.get("team1", "")
         team2 = match.get("team2", "")
+
         if group not in table or team1 not in table[group] or team2 not in table[group]:
             continue
 
@@ -174,8 +229,10 @@ def build_points_table(matches):
 
         table[group][team1]["played"] += 1
         table[group][team2]["played"] += 1
+
         table[group][team1]["gf"] += goals1
         table[group][team1]["ga"] += goals2
+
         table[group][team2]["gf"] += goals2
         table[group][team2]["ga"] += goals1
 
@@ -197,12 +254,18 @@ def build_points_table(matches):
         table[group][team2]["gd"] = table[group][team2]["gf"] - table[group][team2]["ga"]
 
     return {
-        group: sorted(teams.values(), key=lambda x: (x["points"], x["gd"], x["gf"], x["team"]), reverse=True)
+        group: sorted(
+            teams.values(),
+            key=lambda x: (x["points"], x["gd"], x["gf"], x["team"]),
+            reverse=True
+        )
         for group, teams in table.items()
     }
 
+
 def normalize_squads(raw):
     squads = {}
+
     if isinstance(raw, dict):
         if isinstance(raw.get("squads"), list):
             items = raw["squads"]
@@ -218,58 +281,86 @@ def normalize_squads(raw):
     for item in items:
         if not isinstance(item, dict):
             continue
+
         team = item.get("team") or item.get("name") or item.get("title") or item.get("team_name") or "Unknown Team"
         players = item.get("players") or item.get("squad") or item.get("roster") or []
+
         normalized = []
+
         if isinstance(players, list):
             for player in players:
                 if isinstance(player, str):
-                    normalized.append({"name": player, "number": "", "position": ""})
+                    normalized.append({
+                        "name": player,
+                        "number": "",
+                        "position": ""
+                    })
                 elif isinstance(player, dict):
                     normalized.append({
                         "name": player.get("name") or player.get("player") or "Unknown",
                         "number": player.get("number") or player.get("no") or "",
                         "position": player.get("position") or player.get("pos") or ""
                     })
+
         squads[team] = normalized
+
     return squads
 
-def team_filter_html(section_id, teams):
+
+def team_filter_html(teams):
     options = '<option value="">All teams</option>'
+
     for team in teams:
         safe_team = escape(team)
         options += f'<option value="{safe_team}">{safe_team}</option>'
+
     return f"""
-    <select class="team-select match-team-filter" data-section="{section_id}" onchange="applyFilters()">
+    <select class="team-select match-team-filter" onchange="applyFilters()">
         {options}
     </select>
     """
 
-def match_cards(matches, teams, section_id, show_score=False, show_round=False, show_status=False, show_scorers=False):
-    if not matches:
-        return team_filter_html(section_id, teams) + "<div class='empty-card'>No matches available.</div>"
 
-    cards = team_filter_html(section_id, teams)
+def match_cards(matches, teams, show_score=False, show_round=False, show_status=False, show_scorers=False):
+    if not matches:
+        return team_filter_html(teams) + "<div class='empty-card'>No matches available.</div>"
+
+    cards = team_filter_html(teams)
 
     for match_no, match in enumerate(matches, start=1):
         team1 = match.get("team1", "")
         team2 = match.get("team2", "")
         scorer_details = goal_scorer_text(match) if show_scorers else ""
+
         search_text = f"{team1} {team2} {match.get('group', '')} {match.get('round', '')} {scorer_details}".lower()
-        score_html = f"<span class='score-pill'>{escape(score_text(match))}</span>" if show_score else ""
-        round_html = f"<div class='match-info'><span>Round</span><b>{escape(match.get('round', ''))}</b></div>" if show_round else ""
-        status_html = f"<div class='match-info'><span>Status</span><b>{'Completed' if completed(match) else 'Upcoming'}</b></div>" if show_status else ""
-        scorers_html = f"<div class='match-info full'><span>Goal Scorers</span><b>{escape(scorer_details)}</b></div>" if show_scorers else ""
+
+        score_html = ""
+        if show_score:
+            score_html = f"<span class='score-pill'>{escape(score_text(match))}</span>"
+
+        round_html = ""
+        if show_round:
+            round_html = f"<div class='match-info'><span>Round</span><b>{escape(match.get('round', ''))}</b></div>"
+
+        status_html = ""
+        if show_status:
+            status_html = f"<div class='match-info'><span>Status</span><b>{'Completed' if completed(match) else 'Upcoming'}</b></div>"
+
+        scorers_html = ""
+        if show_scorers:
+            scorers_html = f"<div class='match-info full'><span>Goal Scorers</span><b>{escape(scorer_details)}</b></div>"
 
         cards += f"""
         <div class="match-card" data-search="{escape(search_text)}" data-team1="{escape(team1)}" data-team2="{escape(team2)}">
             <div class="match-number">Match {match_no}</div>
+
             <div class="match-main-row">
                 <div class="team-name">{team_label(team1)}</div>
                 <div class="vs-text">vs</div>
                 <div class="team-name">{team_label(team2)}</div>
                 <div class="match-score">{score_html}</div>
             </div>
+
             <div class="match-details-grid">
                 {round_html}
                 <div class="match-info"><span>Date</span><b>{escape(match.get('date', ''))}</b></div>
@@ -284,6 +375,7 @@ def match_cards(matches, teams, section_id, show_score=False, show_round=False, 
         """
 
     return cards
+
 
 def scorer_cards(scorers):
     if not scorers:
@@ -313,6 +405,7 @@ def scorer_cards(scorers):
         """
 
     return html
+
 
 def points_tables(standings):
     html = ""
@@ -362,6 +455,7 @@ def points_tables(standings):
 
     return html or "<div class='empty-card'>Points table not available.</div>"
 
+
 def player_dropdown_html(squads):
     if not squads:
         return "<div class='empty-card'>Player squad data is not available from the free source currently.</div>"
@@ -397,13 +491,17 @@ def player_dropdown_html(squads):
     <select id="teamSelect" class="team-select" onchange="showPlayersByTeam()">
         {options}
     </select>
+
     <div id="playerHint" class="empty-card">Select a country to view players.</div>
+
     {cards}
     """
+
 
 @app.route("/")
 def home():
     return world_cup_2026()
+
 
 @app.route("/world-cup-2026")
 def world_cup_2026():
@@ -475,7 +573,7 @@ def world_cup_2026():
 
             .tabs {{
                 display: grid;
-                grid-template-columns: repeat(2,1fr);
+                grid-template-columns: repeat(2, 1fr);
                 gap: 8px;
             }}
 
@@ -748,8 +846,10 @@ def world_cup_2026():
             function showSection(sectionId, buttonId) {{
                 document.querySelectorAll('.section').forEach(section => section.classList.remove('active'));
                 document.querySelectorAll('.tab').forEach(button => button.classList.remove('active'));
+
                 document.getElementById(sectionId).classList.add('active');
                 document.getElementById(buttonId).classList.add('active');
+
                 applyFilters();
             }}
 
@@ -833,27 +933,27 @@ def world_cup_2026():
 
             <section id="today" class="section active">
                 <h2 class="section-title">📅 Matches Today</h2>
-                {match_cards(today_matches, teams, 'today', True, False, False, True)}
+                {match_cards(today_matches, teams, True, False, False, True)}
             </section>
 
             <section id="tomorrow" class="section">
                 <h2 class="section-title">🗓️ Matches Tomorrow</h2>
-                {match_cards(tomorrow_matches, teams, 'tomorrow', True)}
+                {match_cards(tomorrow_matches, teams, True)}
             </section>
 
             <section id="completed" class="section">
                 <h2 class="section-title">✅ Completed Matches</h2>
-                {match_cards(completed_matches, teams, 'completed', True, False, False, True)}
+                {match_cards(completed_matches, teams, True, False, False, True)}
             </section>
 
             <section id="upcoming" class="section">
                 <h2 class="section-title">⏳ Upcoming Matches</h2>
-                {match_cards(upcoming_matches, teams, 'upcoming')}
+                {match_cards(upcoming_matches, teams)}
             </section>
 
             <section id="fixtures" class="section">
                 <h2 class="section-title">🏟️ Fixtures</h2>
-                {match_cards(all_matches, teams, 'fixtures', True, True, True)}
+                {match_cards(all_matches, teams, True, True, True)}
             </section>
 
             <section id="points" class="section">
@@ -902,4 +1002,3 @@ def api_squads():
 
 if __name__ == "__main__":
     app.run(debug=True)
-``
