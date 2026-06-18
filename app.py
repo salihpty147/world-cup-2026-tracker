@@ -2,6 +2,7 @@ from flask import Flask, jsonify
 from urllib.request import urlopen
 import json
 from html import escape
+from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
 
@@ -29,6 +30,28 @@ def get_score(match):
     return "Upcoming"
 
 
+def convert_to_ist(date_text, time_text):
+    try:
+        if not time_text or "UTC" not in time_text:
+            return time_text
+
+        time_part, utc_part = time_text.split(" UTC")
+        match_datetime = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
+
+        offset_hours = int(utc_part)
+
+        source_timezone = timezone(timedelta(hours=offset_hours))
+        match_datetime = match_datetime.replace(tzinfo=source_timezone)
+
+        ist_timezone = timezone(timedelta(hours=5, minutes=30))
+        ist_datetime = match_datetime.astimezone(ist_timezone)
+
+        return ist_datetime.strftime("%d %b %Y, %I:%M %p IST")
+
+    except Exception:
+        return time_text
+
+
 @app.route("/")
 def home():
     return world_cup_tracker()
@@ -46,7 +69,7 @@ def world_cup_tracker():
         completed_rows += f"""
         <tr>
             <td>{escape(match.get("date", ""))}</td>
-            <td>{escape(match.get("time", ""))}</td>
+            <td>{escape(convert_to_ist(match.get("date", ""), match.get("time", "")))}</td>
             <td><span class="group-badge">{escape(match.get("group", ""))}</span></td>
             <td>{escape(match.get("team1", ""))} vs {escape(match.get("team2", ""))}</td>
             <td><span class="score-badge">{get_score(match)}</span></td>
@@ -59,7 +82,7 @@ def world_cup_tracker():
         upcoming_rows += f"""
         <tr>
             <td>{escape(match.get("date", ""))}</td>
-            <td>{escape(match.get("time", ""))}</td>
+            <td>{escape(convert_to_ist(match.get("date", ""), match.get("time", "")))}</td>
             <td><span class="group-badge">{escape(match.get("group", ""))}</span></td>
             <td>{escape(match.get("team1", ""))} vs {escape(match.get("team2", ""))}</td>
             <td>{escape(match.get("ground", ""))}</td>
@@ -235,7 +258,7 @@ def world_cup_tracker():
             <table>
                 <tr>
                     <th>Date</th>
-                    <th>Time</th>
+                    <th>Indian Time</th>
                     <th>Group</th>
                     <th>Match</th>
                     <th>Score</th>
@@ -248,7 +271,7 @@ def world_cup_tracker():
             <table>
                 <tr>
                     <th>Date</th>
-                    <th>Time</th>
+                    <th>Indian Time</th>
                     <th>Group</th>
                     <th>Match</th>
                     <th>Venue</th>
@@ -257,7 +280,7 @@ def world_cup_tracker():
             </table>
 
             <div class="footer">
-                Data source: OpenFootball World Cup 2026 JSON.
+                Data source: OpenFootball World Cup 2026 JSON. Time converted to Indian Standard Time.
             </div>
 
         </div>
