@@ -25,15 +25,19 @@ COUNTRY_CODES = {
 }
 
 
-def flag_image(team):
-    code = COUNTRY_CODES.get(team)
-    if not code:
+def flag_img(team):
+    country_code = COUNTRY_CODES.get(team)
+
+    if not country_code:
         return ""
-    return f'https://flagcdn.com/24x18/{code}.png flag" loading="lazy">'
+
+    safe_team = escape(team)
+
+    return f'<img class="team-flag" src="https://flagcdn.com/24x18/{country_code}.png" alt="{safe_team} flag" loading="lazy">'
 
 
 def team_label(team):
-    return f'{flag_image(team)}<span>{escape(team)}</span>'
+    return f'{flag_img(team)}<span>{escape(team)}</span>'
 
 
 def fetch_json(url):
@@ -62,10 +66,11 @@ def score_text(match):
     if completed(match):
         score = match["score"]["ft"]
         return f"{score[0]} - {score[1]}"
+
     return "Upcoming"
 
 
-def match_ist_datetime(match):
+def match_datetime_ist(match):
     try:
         date_text = match.get("date", "")
         time_text = match.get("time", "")
@@ -74,31 +79,35 @@ def match_ist_datetime(match):
             return None
 
         time_part, offset_part = time_text.split(" UTC")
-        source_dt = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
-        source_tz = timezone(timedelta(hours=int(offset_part)))
+        local_dt = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
+        local_tz = timezone(timedelta(hours=int(offset_part)))
 
-        return source_dt.replace(tzinfo=source_tz).astimezone(IST)
+        return local_dt.replace(tzinfo=local_tz).astimezone(IST)
 
     except Exception:
         return None
 
 
-def match_sort_key(match):
-    return match_ist_datetime(match) or datetime.max.replace(tzinfo=timezone.utc)
+def sort_key(match):
+    return match_datetime_ist(match) or datetime.max.replace(tzinfo=timezone.utc)
 
 
 def ist_text(match):
-    dt = match_ist_datetime(match)
-    return dt.strftime("%d %b %Y, %I:%M %p IST") if dt else "TBA"
+    dt = match_datetime_ist(match)
+
+    if not dt:
+        return "TBA"
+
+    return dt.strftime("%d %b %Y, %I:%M %p IST")
 
 
 def ist_date(match):
-    dt = match_ist_datetime(match)
+    dt = match_datetime_ist(match)
     return dt.date() if dt else None
 
 
 def goal_scorer_text(match):
-    parts = []
+    items = []
 
     for goals_key, team_key in [("goals1", "team1"), ("goals2", "team2")]:
         team = match.get(team_key, "")
@@ -107,9 +116,9 @@ def goal_scorer_text(match):
             name = goal.get("name", "Unknown")
             minute = goal.get("minute", "")
             penalty = " pen" if goal.get("penalty") else ""
-            parts.append(f"{name} ({team}, {minute}'{penalty})")
+            items.append(f"{name} ({team}, {minute}'{penalty})")
 
-    return "; ".join(parts) if parts else "Goal scorer details not available"
+    return "; ".join(items) if items else "Goal scorer details not available"
 
 
 def build_top_scorers(matches):
@@ -123,12 +132,11 @@ def build_top_scorers(matches):
                 player = goal.get("name", "Unknown")
                 key = f"{player}|{team}"
 
-                if key not in scorers:
-                    scorers[key] = {
-                        "player": player,
-                        "team": team,
-                        "goals": 0
-                    }
+                scorers.setdefault(key, {
+                    "player": player,
+                    "team": team,
+                    "goals": 0
+                })
 
                 scorers[key]["goals"] += 1
 
@@ -173,7 +181,8 @@ def build_points_table(matches):
         team1 = match.get("team1", "")
         team2 = match.get("team2", "")
 
-        if group not in table or team1 not in table[group] or team2 not in tablecontinue
+        if group not in table or team1 not in table[group] or team2 not in table[group]:
+            continue
 
         goals1, goals2 = match["score"]["ft"]
         goals1 = int(goals1)
@@ -224,7 +233,7 @@ def normalize_squads(raw):
         elif isinstance(raw.get("teams"), list):
             items = raw["teams"]
         else:
-            items = [{"team": k, "players": v} for k, v in raw.items()]
+            items = [{"team": team_name, "players": players} for team_name, players in raw.items()]
     elif isinstance(raw, list):
         items = raw
     else:
@@ -372,7 +381,8 @@ def player_cards(squads):
     for team in sorted(squads.keys()):
         html += f"<h3 class='group-title'>{team_label(team)}</h3>"
 
-        for player in squadssearch_text = f"{player.get('name', '')} {player.get('position', '')} {team}".lower()
+        for player in squads[team]:
+            search_text = f"{player.get('name', '')} {player.get('position', '')} {team}".lower()
             number = player.get("number", "")
             position = player.get("position", "") or "Position not available"
 
@@ -383,7 +393,7 @@ def player_cards(squads):
                     <b>{escape(player.get('name', ''))}</b>
                     <span>{escape(position)}</span>
                 </div>
-                <div>{flag_image(team)}</div>
+                <div>{flag_img(team)}</div>
             </div>
             """
 
@@ -399,10 +409,10 @@ def home():
 def world_cup_2026():
     matches = get_matches()
 
-    all_matches = sorted(matches, key=match_sort_key)
-    completed_matches = sorted([m for m in matches if completed(m)], key=match_sort_key)
+    all_matches = sorted(matches, key=sort_key)
+    completed_matches = sorted([m for m in matches if completed(m)], key=sort_key)
     recent_matches = list(reversed(completed_matches[-8:]))
-    upcoming_matches = sorted([m for m in matches if not completed(m)], key=match_sort_key)
+    upcoming_matches = sorted([m for m in matches if not completed(m)], key=sort_key)
 
     today = datetime.now(IST).date()
     tomorrow = today + timedelta(days=1)
@@ -410,20 +420,9 @@ def world_cup_2026():
     today_matches = [m for m in all_matches if ist_date(m) == today]
     tomorrow_matches = [m for m in all_matches if ist_date(m) == tomorrow]
 
-    next_match = upcoming_matches[0] if upcoming_matches else None
-    latest_result = recent_matches[0] if recent_matches else None
-
     standings = build_points_table(matches)
     scorers = build_top_scorers(matches)
     squads = normalize_squads(get_squads_raw())
-
-    next_text = "No upcoming match"
-    if next_match:
-        next_text = f"{next_match.get('team1', '')} vs {next_match.get('team2', '')} • {ist_text(next_match)}"
-
-    latest_text = "No completed result"
-    if latest_result:
-        latest_text = f"{latest_result.get('team1', '')} {score_text(latest_result)} {latest_result.get('team2', '')}"
 
     return f"""
     <!DOCTYPE html>
@@ -447,19 +446,13 @@ def world_cup_2026():
             .hero {{
                 background: linear-gradient(135deg, #071b3a, #0057a8, #00a86b);
                 color: white;
-                padding: 16px 14px 16px;
+                padding: 16px 14px;
             }}
 
             .hero h1 {{
                 margin: 0;
                 font-size: 24px;
                 line-height: 1.2;
-            }}
-
-            .hero p {{
-                margin: 6px 0 0;
-                font-size: 13px;
-                opacity: .9;
             }}
 
             .container {{
@@ -473,7 +466,6 @@ def world_cup_2026():
                 border-radius: 18px;
                 padding: 12px;
                 box-shadow: 0 8px 24px rgba(15,23,42,.08);
-                margin-top: 0;
             }}
 
             .tabs {{
@@ -542,23 +534,6 @@ def world_cup_2026():
             .summary-label {{
                 font-size: 12px;
                 color: #64748b;
-            }}
-
-            .quick {{
-                background: white;
-                padding: 14px;
-                border-radius: 18px;
-                box-shadow: 0 8px 24px rgba(15,23,42,.08);
-                margin-bottom: 12px;
-            }}
-
-            .quick div {{
-                background: #f1f7fd;
-                border-radius: 14px;
-                padding: 10px;
-                margin-top: 8px;
-                font-weight: 700;
-                font-size: 13px;
             }}
 
             .section {{
@@ -702,7 +677,7 @@ def world_cup_2026():
                 box-shadow: 0 1px 3px rgba(0,0,0,.18);
             }}
 
-            @media (min-width: 800px) {{
+            @media (min-width:800px) {{
                 .hero {{
                     padding: 20px 22px 22px;
                 }}
@@ -753,7 +728,6 @@ def world_cup_2026():
     <body>
         <div class="hero">
             <h1>⚽ FIFA World Cup 2026 Tracker</h1>
-            <p>Fixtures, results, IST time, points table, top scorers and squads</p>
         </div>
 
         <main class="container">
@@ -806,12 +780,6 @@ def world_cup_2026():
                         <div class="summary-label">Today in IST</div>
                     </div>
                 </div>
-            </div>
-
-            <div class="quick">
-                <b>📌 Quick Details</b>
-                <div>⏭️ Next Match: {escape(next_text)}</div>
-                <div>✅ Latest Result: {escape(latest_text)}</div>
             </div>
 
             <section id="today" class="section active">
