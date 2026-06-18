@@ -453,7 +453,15 @@ def world_cup_2026():
     <head>
         <title>FIFA World Cup 2026 Tracker</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-VMBRKJMJNM"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
 
+  gtag('config', 'G-VMBRKJMJNM');
+</script>
         <style>
             * {{
                 box-sizing: border-box;
