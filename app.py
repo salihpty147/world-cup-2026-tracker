@@ -457,7 +457,7 @@ def world_cup_2026():
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-VMBRKJMJNM"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
+  function gtag(){{dataLayer.push(arguments);}}
   gtag('js', new Date());
 
   gtag('config', 'G-VMBRKJMJNM');
