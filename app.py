@@ -1,62 +1,56 @@
-from flask import Flask
+from flask import Flask, jsonify
+from urllib.request import urlopen
+import json
+from html import escape
 
 app = Flask(__name__)
 
-completed_matches = [
-    {"date": "11 Jun 2026", "group": "Group A", "match": "Mexico vs South Africa", "score": "2-0", "venue": "Mexico City Stadium"},
-    {"date": "11 Jun 2026", "group": "Group A", "match": "Korea Republic vs Czechia", "score": "2-1", "venue": "Guadalajara Stadium"},
+DATA_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
 
-    {"date": "12 Jun 2026", "group": "Group B", "match": "Canada vs Bosnia and Herzegovina", "score": "1-1", "venue": "Toronto Stadium"},
-    {"date": "12 Jun 2026", "group": "Group D", "match": "USA vs Paraguay", "score": "4-1", "venue": "Los Angeles Stadium"},
 
-    {"date": "13 Jun 2026", "group": "Group B", "match": "Qatar vs Switzerland", "score": "1-1", "venue": "San Francisco Bay Area Stadium"},
-    {"date": "13 Jun 2026", "group": "Group C", "match": "Brazil vs Morocco", "score": "1-1", "venue": "New York New Jersey Stadium"},
-    {"date": "13 Jun 2026", "group": "Group C", "match": "Haiti vs Scotland", "score": "0-1", "venue": "Boston Stadium"},
-    {"date": "13 Jun 2026", "group": "Group D", "match": "Australia vs Türkiye", "score": "2-0", "venue": "BC Place Vancouver"},
+def get_matches_from_api():
+    try:
+        with urlopen(DATA_URL, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return data.get("matches", [])
+    except Exception as error:
+        print("API error:", error)
+        return []
 
-    {"date": "14 Jun 2026", "group": "Group E", "match": "Germany vs Curaçao", "score": "7-1", "venue": "Houston Stadium"},
-    {"date": "14 Jun 2026", "group": "Group F", "match": "Netherlands vs Japan", "score": "2-2", "venue": "Dallas Stadium"},
-    {"date": "14 Jun 2026", "group": "Group E", "match": "Côte d'Ivoire vs Ecuador", "score": "1-0", "venue": "Philadelphia Stadium"},
-    {"date": "14 Jun 2026", "group": "Group F", "match": "Sweden vs Tunisia", "score": "5-1", "venue": "Monterrey Stadium"},
 
-    {"date": "15 Jun 2026", "group": "Group H", "match": "Spain vs Cabo Verde", "score": "0-0", "venue": "Atlanta Stadium"},
-    {"date": "15 Jun 2026", "group": "Group G", "match": "Belgium vs Egypt", "score": "1-1", "venue": "Seattle Stadium"},
-    {"date": "15 Jun 2026", "group": "Group H", "match": "Saudi Arabia vs Uruguay", "score": "1-1", "venue": "Miami Stadium"},
-    {"date": "15 Jun 2026", "group": "Group G", "match": "IR Iran vs New Zealand", "score": "2-2", "venue": "Los Angeles Stadium"},
+def is_completed(match):
+    return "score" in match and "ft" in match["score"]
 
-    {"date": "16 Jun 2026", "group": "Group I", "match": "France vs Senegal", "score": "3-1", "venue": "New York New Jersey Stadium"},
-    {"date": "16 Jun 2026", "group": "Group I", "match": "Norway vs Iraq", "score": "4-1", "venue": "Boston Stadium"},
-    {"date": "16 Jun 2026", "group": "Group J", "match": "Argentina vs Algeria", "score": "3-0", "venue": "Kansas City Stadium"},
-    {"date": "16 Jun 2026", "group": "Group J", "match": "Austria vs Jordan", "score": "3-1", "venue": "San Francisco Bay Area Stadium"},
 
-    {"date": "17 Jun 2026", "group": "Group K", "match": "Portugal vs DR Congo", "score": "1-1", "venue": "Houston Stadium"},
-    {"date": "17 Jun 2026", "group": "Group L", "match": "England vs Croatia", "score": "4-2", "venue": "Dallas Stadium"},
-    {"date": "17 Jun 2026", "group": "Group L", "match": "Ghana vs Panama", "score": "1-0", "venue": "Toronto Stadium"},
-    {"date": "18 Jun 2026", "group": "Group K", "match": "Uzbekistan vs Colombia", "score": "1-3", "venue": "Mexico City Stadium"}
-]
+def get_score(match):
+    if is_completed(match):
+        score = match["score"]["ft"]
+        return f"{score[0]} - {score[1]}"
+    return "Upcoming"
 
-upcoming_matches = [
-    {"date": "18 Jun 2026", "time": "9:30 PM IST", "group": "Group A", "match": "Czechia vs South Africa", "venue": "Atlanta Stadium"},
-    {"date": "19 Jun 2026", "time": "12:30 AM IST", "group": "Group B", "match": "Switzerland vs Bosnia and Herzegovina", "venue": "Los Angeles Stadium"},
-    {"date": "19 Jun 2026", "time": "3:30 AM IST", "group": "Group B", "match": "Canada vs Qatar", "venue": "BC Place Vancouver"},
-    {"date": "19 Jun 2026", "time": "6:30 AM IST", "group": "Group A", "match": "Mexico vs Korea Republic", "venue": "Guadalajara Stadium"},
-
-    {"date": "20 Jun 2026", "time": "12:30 AM IST", "group": "Group D", "match": "USA vs Australia", "venue": "Seattle Stadium"},
-    {"date": "20 Jun 2026", "time": "3:30 AM IST", "group": "Group C", "match": "Scotland vs Morocco", "venue": "Boston Stadium"},
-    {"date": "20 Jun 2026", "time": "6:30 AM IST", "group": "Group C", "match": "Brazil vs Haiti", "venue": "Philadelphia Stadium"}
-]
 
 @app.route("/")
 def home():
+    return world_cup_tracker()
+
+
+@app.route("/world-cup-2026")
+def world_cup_tracker():
+    matches = get_matches_from_api()
+
+    completed_matches = [match for match in matches if is_completed(match)]
+    upcoming_matches = [match for match in matches if not is_completed(match)]
+
     completed_rows = ""
     for match in completed_matches:
         completed_rows += f"""
         <tr>
-            <td>{match['date']}</td>
-            <td>{match['group']}</td>
-            <td>{match['match']}</td>
-            <td>{match['score']}</td>
-            <td>{match['venue']}</td>
+            <td>{escape(match.get("date", ""))}</td>
+            <td>{escape(match.get("time", ""))}</td>
+            <td><span class="group-badge">{escape(match.get("group", ""))}</span></td>
+            <td>{escape(match.get("team1", ""))} vs {escape(match.get("team2", ""))}</td>
+            <td><span class="score-badge">{get_score(match)}</span></td>
+            <td>{escape(match.get("ground", ""))}</td>
         </tr>
         """
 
@@ -64,11 +58,11 @@ def home():
     for match in upcoming_matches:
         upcoming_rows += f"""
         <tr>
-            <td>{match['date']}</td>
-            <td>{match['time']}</td>
-            <td>{match['group']}</td>
-            <td>{match['match']}</td>
-            <td>{match['venue']}</td>
+            <td>{escape(match.get("date", ""))}</td>
+            <td>{escape(match.get("time", ""))}</td>
+            <td><span class="group-badge">{escape(match.get("group", ""))}</span></td>
+            <td>{escape(match.get("team1", ""))} vs {escape(match.get("team2", ""))}</td>
+            <td>{escape(match.get("ground", ""))}</td>
         </tr>
         """
 
@@ -76,104 +70,207 @@ def home():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>World Cup 2026 Tracker</title>
+        <title>FIFA World Cup 2026 Tracker</title>
         <style>
             body {{
-                font-family: Arial, sans-serif;
-                background-color: #f4f6f8;
                 margin: 0;
-                padding: 20px;
+                font-family: Arial, sans-serif;
+                background: #eef2f7;
+                color: #1f2937;
             }}
 
-            h1 {{
+            .header {{
+                background: linear-gradient(135deg, #003b5c, #0077b6);
+                color: white;
+                padding: 30px;
                 text-align: center;
-                color: #12355b;
             }}
 
-            h2 {{
-                color: #1f4e79;
-                margin-top: 35px;
+            .header h1 {{
+                margin: 0;
+                font-size: 36px;
+            }}
+
+            .header p {{
+                margin-top: 8px;
+                font-size: 16px;
+            }}
+
+            .container {{
+                width: 95%;
+                margin: 25px auto;
+            }}
+
+            .summary {{
+                display: flex;
+                gap: 20px;
+                margin-bottom: 25px;
+            }}
+
+            .card {{
+                flex: 1;
+                background: white;
+                padding: 20px;
+                border-radius: 12px;
+                box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+                text-align: center;
+            }}
+
+            .card h2 {{
+                margin: 0;
+                color: #0077b6;
+                font-size: 32px;
+            }}
+
+            .card p {{
+                margin: 5px 0 0;
+                color: #555;
+            }}
+
+            .section-title {{
+                margin-top: 30px;
+                padding-left: 10px;
+                border-left: 5px solid #0077b6;
+                color: #003b5c;
             }}
 
             table {{
                 width: 100%;
                 border-collapse: collapse;
-                background-color: white;
-                margin-top: 10px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                background: white;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+                margin-top: 12px;
             }}
 
             th {{
-                background-color: #1f4e79;
+                background: #003b5c;
                 color: white;
-                padding: 12px;
+                padding: 14px;
                 text-align: left;
+                font-size: 14px;
             }}
 
             td {{
-                padding: 10px;
-                border-bottom: 1px solid #ddd;
+                padding: 13px;
+                border-bottom: 1px solid #e5e7eb;
+                font-size: 14px;
             }}
 
             tr:hover {{
-                background-color: #f1f1f1;
+                background: #f3f8ff;
             }}
 
-            .completed {{
-                color: green;
+            .score-badge {{
+                background: #16a34a;
+                color: white;
+                padding: 6px 12px;
+                border-radius: 20px;
                 font-weight: bold;
             }}
 
-            .upcoming {{
-                color: orange;
+            .group-badge {{
+                background: #e0f2fe;
+                color: #0369a1;
+                padding: 6px 10px;
+                border-radius: 20px;
                 font-weight: bold;
+                font-size: 12px;
             }}
 
-            .summary {{
-                background-color: white;
-                padding: 15px;
-                border-radius: 8px;
-                margin-bottom: 20px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            .footer {{
+                text-align: center;
+                margin: 30px;
+                color: #666;
+                font-size: 13px;
+            }}
+
+            @media (max-width: 768px) {{
+                .summary {{
+                    flex-direction: column;
+                }}
+
+                table {{
+                    font-size: 12px;
+                }}
+
+                th, td {{
+                    padding: 8px;
+                }}
+
+                .header h1 {{
+                    font-size: 26px;
+                }}
             }}
         </style>
     </head>
+
     <body>
-
-        <h1>FIFA World Cup 2026 Match Tracker</h1>
-
-        <div class="summary">
-            <p><b>Total Completed Matches Shown:</b> {len(completed_matches)}</p>
-            <p><b>Total Upcoming Matches Shown:</b> {len(upcoming_matches)}</p>
+        <div class="header">
+            <h1>FIFA World Cup 2026 Tracker</h1>
+            <p>Match data loaded from online JSON API/source</p>
         </div>
 
-        <h2 class="completed">Completed Matches</h2>
-        <table>
-            <tr>
-                <th>Date</th>
-                <th>Group</th>
-                <th>Match</th>
-                <th>Score</th>
-                <th>Venue</th>
-            </tr>
-            {completed_rows}
-        </table>
+        <div class="container">
 
-        <h2 class="upcoming">Upcoming Matches</h2>
-        <table>
-            <tr>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Group</th>
-                <th>Match</th>
-                <th>Venue</th>
-            </tr>
-            {upcoming_rows}
-        </table>
+            <div class="summary">
+                <div class="card">
+                    <h2>{len(matches)}</h2>
+                    <p>Total Matches</p>
+                </div>
 
+                <div class="card">
+                    <h2>{len(completed_matches)}</h2>
+                    <p>Completed Matches</p>
+                </div>
+
+                <div class="card">
+                    <h2>{len(upcoming_matches)}</h2>
+                    <p>Upcoming Matches</p>
+                </div>
+            </div>
+
+            <h2 class="section-title">Completed Matches</h2>
+            <table>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Group</th>
+                    <th>Match</th>
+                    <th>Score</th>
+                    <th>Venue</th>
+                </tr>
+                {completed_rows}
+            </table>
+
+            <h2 class="section-title">Upcoming Matches</h2>
+            <table>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Group</th>
+                    <th>Match</th>
+                    <th>Venue</th>
+                </tr>
+                {upcoming_rows}
+            </table>
+
+            <div class="footer">
+                Data source: OpenFootball World Cup 2026 JSON.
+            </div>
+
+        </div>
     </body>
     </html>
     """
+
+
+@app.route("/api/matches")
+def api_matches():
+    matches = get_matches_from_api()
+    return jsonify(matches)
+
 
 if __name__ == "__main__":
     app.run(debug=True)
