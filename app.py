@@ -52,6 +52,79 @@ def convert_to_ist(date_text, time_text):
         return time_text
 
 
+def build_points_table(matches):
+    standings = {}
+
+    for match in matches:
+        if not is_completed(match):
+            continue
+
+        group = match.get("group", "Other")
+        team1 = match.get("team1", "")
+        team2 = match.get("team2", "")
+
+        if not group or not team1 or not team2:
+            continue
+
+        score = match["score"]["ft"]
+        team1_goals = score[0]
+        team2_goals = score[1]
+
+        if group not in standings:
+            standings[group] = {}
+
+        for team in [team1, team2]:
+            if team not in standingsstandings[group][team] = {
+                    "team": team,
+                    "played": 0,
+                    "won": 0,
+                    "drawn": 0,
+                    "lost": 0,
+                    "gf": 0,
+                    "ga": 0,
+                    "gd": 0,
+                    "points": 0
+                }
+
+        standings[group][team1]["played"] += 1
+        standings[group][team2]["played"] += 1
+
+        standings[group][team1]["gf"] += team1_goals
+        standings[group][team1]["ga"] += team2_goals
+
+        standings[group][team2]["gf"] += team2_goals
+        standings[group][team2]["ga"] += team1_goals
+
+        if team1_goals > team2_goals:
+            standings[group][team1]["won"] += 1
+            standings[group][team2]["lost"] += 1
+            standings[group][team1]["points"] += 3
+        elif team2_goals > team1_goals:
+            standings[group][team2]["won"] += 1
+            standings[group][team1]["lost"] += 1
+            standings[group][team2]["points"] += 3
+        else:
+            standings[group][team1]["drawn"] += 1
+            standings[group][team2]["drawn"] += 1
+            standings[group][team1]["points"] += 1
+            standings[group][team2]["points"] += 1
+
+        standings[group][team1]["gd"] = standings[group][team1]["gf"] - standings[group][team1]["ga"]
+        standings[group][team2]["gd"] = standings[group][team2]["gf"] - standings[group][team2]["ga"]
+
+    sorted_standings = {}
+
+    for group, teams in standings.items():
+        sorted_teams = sorted(
+            teams.values(),
+            key=lambda x: (x["points"], x["gd"], x["gf"]),
+            reverse=True
+        )
+        sorted_standings[group] = sorted_teams
+
+    return sorted_standings
+
+
 @app.route("/")
 def home():
     return world_cup_tracker()
@@ -63,6 +136,7 @@ def world_cup_tracker():
 
     completed_matches = [match for match in matches if is_completed(match)]
     upcoming_matches = [match for match in matches if not is_completed(match)]
+    standings = build_points_table(matches)
 
     completed_rows = ""
     for match in completed_matches:
@@ -88,6 +162,45 @@ def world_cup_tracker():
             <td>{escape(match.get("ground", ""))}</td>
         </tr>
         """
+
+    points_html = ""
+
+    for group in sorted(standings.keys()):
+        points_html += f"""
+        <h3 class="group-title">{escape(group)}</h3>
+        <table>
+            <tr>
+                <th>Position</th>
+                <th>Team</th>
+                <th>Played</th>
+                <th>Won</th>
+                <th>Drawn</th>
+                <th>Lost</th>
+                <th>GF</th>
+                <th>GA</th>
+                <th>GD</th>
+                <th>Points</th>
+            </tr>
+        """
+
+        position = 1
+        for team in standingspoints_html += f"""
+            <tr>
+                <td>{position}</td>
+                <td>{escape(team["team"])}</td>
+                <td>{team["played"]}</td>
+                <td>{team["won"]}</td>
+                <td>{team["drawn"]}</td>
+                <td>{team["lost"]}</td>
+                <td>{team["gf"]}</td>
+                <td>{team["ga"]}</td>
+                <td>{team["gd"]}</td>
+                <td><span class="points-badge">{team["points"]}</span></td>
+            </tr>
+            """
+            position += 1
+
+        points_html += "</table>"
 
     return f"""
     <!DOCTYPE html>
@@ -150,10 +263,50 @@ def world_cup_tracker():
                 color: #555;
             }}
 
+            .button-area {{
+                display: flex;
+                gap: 15px;
+                justify-content: center;
+                margin: 25px 0;
+                flex-wrap: wrap;
+            }}
+
+            .tab-button {{
+                background: #003b5c;
+                color: white;
+                border: none;
+                padding: 14px 22px;
+                border-radius: 25px;
+                font-size: 15px;
+                font-weight: bold;
+                cursor: pointer;
+            }}
+
+            .tab-button:hover {{
+                background: #0077b6;
+            }}
+
+            .tab-button.active {{
+                background: #16a34a;
+            }}
+
+            .section {{
+                display: none;
+            }}
+
+            .section.active {{
+                display: block;
+            }}
+
             .section-title {{
                 margin-top: 30px;
                 padding-left: 10px;
                 border-left: 5px solid #0077b6;
+                color: #003b5c;
+            }}
+
+            .group-title {{
+                margin-top: 25px;
                 color: #003b5c;
             }}
 
@@ -165,6 +318,7 @@ def world_cup_tracker():
                 overflow: hidden;
                 box-shadow: 0 3px 12px rgba(0,0,0,0.08);
                 margin-top: 12px;
+                margin-bottom: 25px;
             }}
 
             th {{
@@ -187,6 +341,14 @@ def world_cup_tracker():
 
             .score-badge {{
                 background: #16a34a;
+                color: white;
+                padding: 6px 12px;
+                border-radius: 20px;
+                font-weight: bold;
+            }}
+
+            .points-badge {{
+                background: #f59e0b;
                 color: white;
                 padding: 6px 12px;
                 border-radius: 20px;
@@ -227,6 +389,21 @@ def world_cup_tracker():
                 }}
             }}
         </style>
+
+        <script>
+            function showSection(sectionId, buttonId) {{
+                document.getElementById("completed-section").classList.remove("active");
+                document.getElementById("upcoming-section").classList.remove("active");
+                document.getElementById("points-section").classList.remove("active");
+
+                document.getElementById("completed-btn").classList.remove("active");
+                document.getElementById("upcoming-btn").classList.remove("active");
+                document.getElementById("points-btn").classList.remove("active");
+
+                document.getElementById(sectionId).classList.add("active");
+                document.getElementById(buttonId).classList.add("active");
+            }}
+        </script>
     </head>
 
     <body>
@@ -252,32 +429,60 @@ def world_cup_tracker():
                     <h2>{len(upcoming_matches)}</h2>
                     <p>Upcoming Matches</p>
                 </div>
+
+                <div class="card">
+                    <h2>{len(standings)}</h2>
+                    <p>Groups With Points</p>
+                </div>
             </div>
 
-            <h2 class="section-title">Completed Matches</h2>
-            <table>
-                <tr>
-                    <th>Date</th>
-                    <th>Indian Time</th>
-                    <th>Group</th>
-                    <th>Match</th>
-                    <th>Score</th>
-                    <th>Venue</th>
-                </tr>
-                {completed_rows}
-            </table>
+            <div class="button-area">
+                <button id="completed-btn" class="tab-button active" onclick="showSection('completed-section', 'completed-btn')">
+                    Completed Matches
+                </button>
 
-            <h2 class="section-title">Upcoming Matches</h2>
-            <table>
-                <tr>
-                    <th>Date</th>
-                    <th>Indian Time</th>
-                    <th>Group</th>
-                    <th>Match</th>
-                    <th>Venue</th>
-                </tr>
-                {upcoming_rows}
-            </table>
+                <button id="upcoming-btn" class="tab-button" onclick="showSection('upcoming-section', 'upcoming-btn')">
+                    Upcoming Matches
+                </button>
+
+                <button id="points-btn" class="tab-button" onclick="showSection('points-section', 'points-btn')">
+                    Group Points Table
+                </button>
+            </div>
+
+            <div id="completed-section" class="section active">
+                <h2 class="section-title">Completed Matches</h2>
+                <table>
+                    <tr>
+                        <th>Date</th>
+                        <th>Indian Time</th>
+                        <th>Group</th>
+                        <th>Match</th>
+                        <th>Score</th>
+                        <th>Venue</th>
+                    </tr>
+                    {completed_rows}
+                </table>
+            </div>
+
+            <div id="upcoming-section" class="section">
+                <h2 class="section-title">Upcoming Matches</h2>
+                <table>
+                    <tr>
+                        <th>Date</th>
+                        <th>Indian Time</th>
+                        <th>Group</th>
+                        <th>Match</th>
+                        <th>Venue</th>
+                    </tr>
+                    {upcoming_rows}
+                </table>
+            </div>
+
+            <div id="points-section" class="section">
+                <h2 class="section-title">Group Stage Points Table</h2>
+                {points_html}
+            </div>
 
             <div class="footer">
                 Data source: OpenFootball World Cup 2026 JSON. Time converted to Indian Standard Time.
@@ -293,6 +498,13 @@ def world_cup_tracker():
 def api_matches():
     matches = get_matches_from_api()
     return jsonify(matches)
+
+
+@app.route("/api/standings")
+def api_standings():
+    matches = get_matches_from_api()
+    standings = build_points_table(matches)
+    return jsonify(standings)
 
 
 if __name__ == "__main__":
