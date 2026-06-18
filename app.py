@@ -8,201 +8,168 @@ app = Flask(__name__)
 
 MATCHES_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
 SQUADS_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.squads.json"
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def fetch_json(url):
     try:
-        with urlopen(url, timeout=10) as response:
+        with urlopen(url, timeout=12) as response:
             return json.loads(response.read().decode("utf-8"))
     except Exception as error:
-        print("API error:", error)
+        print("Data fetch error:", error)
         return {}
 
 
-def get_matches_from_api():
+def get_matches():
     data = fetch_json(MATCHES_URL)
-    if isinstance(data, dict):
-        return data.get("matches", [])
-    return []
+    return data.get("matches", []) if isinstance(data, dict) else []
 
 
-def get_squads_from_api():
+def get_squads_raw():
     return fetch_json(SQUADS_URL)
 
 
-def is_completed(match):
-    return "score" in match and isinstance(match.get("score"), dict) and "ft" in match["score"]
+def completed(match):
+    return isinstance(match.get("score"), dict) and "ft" in match["score"]
 
 
-def get_score(match):
-    if is_completed(match):
+def score_text(match):
+    if completed(match):
         score = match["score"]["ft"]
         return f"{score[0]} - {score[1]}"
     return "Upcoming"
 
 
-def convert_to_ist(date_text, time_text):
-    try:
-        if not time_text or "UTC" not in time_text:
-            return time_text or "TBA"
-
-        time_part, utc_part = time_text.split(" UTC")
-        match_datetime = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
-
-        offset_hours = int(utc_part)
-        source_timezone = timezone(timedelta(hours=offset_hours))
-        match_datetime = match_datetime.replace(tzinfo=source_timezone)
-
-        ist_timezone = timezone(timedelta(hours=5, minutes=30))
-        ist_datetime = match_datetime.astimezone(ist_timezone)
-
-        return ist_datetime.strftime("%d %b %Y, %I:%M %p IST")
-
-    except Exception:
-        return time_text or "TBA"
-
-
-def get_match_datetime_for_sorting(match):
+def match_ist_datetime(match):
     try:
         date_text = match.get("date", "")
         time_text = match.get("time", "")
 
         if not date_text or not time_text or "UTC" not in time_text:
-            return datetime.max.replace(tzinfo=timezone.utc)
+            return None
 
-        time_part, utc_part = time_text.split(" UTC")
-        match_datetime = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
+        time_part, offset_part = time_text.split(" UTC")
+        source_dt = datetime.strptime(f"{date_text} {time_part}", "%Y-%m-%d %H:%M")
+        source_tz = timezone(timedelta(hours=int(offset_part)))
 
-        offset_hours = int(utc_part)
-        source_timezone = timezone(timedelta(hours=offset_hours))
-        match_datetime = match_datetime.replace(tzinfo=source_timezone)
-
-        ist_timezone = timezone(timedelta(hours=5, minutes=30))
-        return match_datetime.astimezone(ist_timezone)
+        return source_dt.replace(tzinfo=source_tz).astimezone(IST)
 
     except Exception:
-        return datetime.max.replace(tzinfo=timezone.utc)
+        return None
+
+
+def match_sort_key(match):
+    return match_ist_datetime(match) or datetime.max.replace(tzinfo=timezone.utc)
+
+
+def ist_text(match):
+    dt = match_ist_datetime(match)
+
+    if not dt:
+        return match.get("time", "TBA") or "TBA"
+
+    return dt.strftime("%d %b %Y, %I:%M %p IST")
+
+
+def ist_date(match):
+    dt = match_ist_datetime(match)
+    return dt.date() if dt else None
 
 
 def build_points_table(matches):
-    standings = {}
+    table = {}
 
     for match in matches:
         group = match.get("group", "")
         team1 = match.get("team1", "")
         team2 = match.get("team2", "")
 
-        if not group or not team1 or not team2 or "Group" not in group:
+        if not group or "Group" not in group or not team1 or not team2:
             continue
 
-        if group not in standings:
-            standings[group] = {}
+        table.setdefault(group, {})
 
         for team in [team1, team2]:
-            if team not in standings[group]:
-                standings[group][team] = {
-                    "team": team,
-                    "played": 0,
-                    "won": 0,
-                    "drawn": 0,
-                    "lost": 0,
-                    "gf": 0,
-                    "ga": 0,
-                    "gd": 0,
-                    "points": 0
-                }
+            table[group].setdefault(team, {
+                "team": team,
+                "played": 0,
+                "won": 0,
+                "drawn": 0,
+                "lost": 0,
+                "gf": 0,
+                "ga": 0,
+                "gd": 0,
+                "points": 0
+            })
 
     for match in matches:
-        if not is_completed(match):
+        if not completed(match):
             continue
 
         group = match.get("group", "")
         team1 = match.get("team1", "")
         team2 = match.get("team2", "")
 
-        if not group or not team1 or not team2 or "Group" not in group:
+        if group not in table or team1 not in table[group] or team2 not in table[group]:
             continue
 
-        if group not in standings:
-            continue
+        goals1, goals2 = match["score"]["ft"]
+        goals1, goals2 = int(goals1), int(goals2)
 
-        if team1 not in standings[group] or team2 not in standings[group]:
-            continue
+        table[group][team1]["played"] += 1
+        table[group][team2]["played"] += 1
 
-        score = match["score"]["ft"]
-        team1_goals = int(score[0])
-        team2_goals = int(score[1])
+        table[group][team1]["gf"] += goals1
+        table[group][team1]["ga"] += goals2
 
-        standings[group][team1]["played"] += 1
-        standings[group][team2]["played"] += 1
+        table[group][team2]["gf"] += goals2
+        table[group][team2]["ga"] += goals1
 
-        standings[group][team1]["gf"] += team1_goals
-        standings[group][team1]["ga"] += team2_goals
-
-        standings[group][team2]["gf"] += team2_goals
-        standings[group][team2]["ga"] += team1_goals
-
-        if team1_goals > team2_goals:
-            standings[group][team1]["won"] += 1
-            standings[group][team2]["lost"] += 1
-            standings[group][team1]["points"] += 3
-        elif team2_goals > team1_goals:
-            standings[group][team2]["won"] += 1
-            standings[group][team1]["lost"] += 1
-            standings[group][team2]["points"] += 3
+        if goals1 > goals2:
+            table[group][team1]["won"] += 1
+            table[group][team2]["lost"] += 1
+            table[group][team1]["points"] += 3
+        elif goals2 > goals1:
+            table[group][team2]["won"] += 1
+            table[group][team1]["lost"] += 1
+            table[group][team2]["points"] += 3
         else:
-            standings[group][team1]["drawn"] += 1
-            standings[group][team2]["drawn"] += 1
-            standings[group][team1]["points"] += 1
-            standings[group][team2]["points"] += 1
+            table[group][team1]["drawn"] += 1
+            table[group][team2]["drawn"] += 1
+            table[group][team1]["points"] += 1
+            table[group][team2]["points"] += 1
 
-        standings[group][team1]["gd"] = standings[group][team1]["gf"] - standings[group][team1]["ga"]
-        standings[group][team2]["gd"] = standings[group][team2]["gf"] - standings[group][team2]["ga"]
+        table[group][team1]["gd"] = table[group][team1]["gf"] - table[group][team1]["ga"]
+        table[group][team2]["gd"] = table[group][team2]["gf"] - table[group][team2]["ga"]
 
-    sorted_standings = {}
-
-    for group, teams in standings.items():
-        sorted_standings[group] = sorted(
+    return {
+        group: sorted(
             teams.values(),
             key=lambda x: (x["points"], x["gd"], x["gf"], x["team"]),
             reverse=True
         )
-
-    return sorted_standings
+        for group, teams in table.items()
+    }
 
 
 def build_top_scorers(matches):
     scorers = {}
 
     for match in matches:
-        team1 = match.get("team1", "")
-        team2 = match.get("team2", "")
+        for goals_key, team_key in [("goals1", "team1"), ("goals2", "team2")]:
+            team = match.get(team_key, "")
 
-        for goal in match.get("goals1", []):
-            player_name = goal.get("name", "Unknown")
-            key = f"{player_name}_{team1}"
+            for goal in match.get(goals_key, []):
+                player = goal.get("name", "Unknown")
+                key = f"{player}|{team}"
 
-            if key not in scorers:
-                scorers[key] = {
-                    "player": player_name,
-                    "team": team1,
+                scorers.setdefault(key, {
+                    "player": player,
+                    "team": team,
                     "goals": 0
-                }
+                })
 
-            scorers[key]["goals"] += 1
-
-        for goal in match.get("goals2", []):
-            player_name = goal.get("name", "Unknown")
-            key = f"{player_name}_{team2}"
-
-            if key not in scorers:
-                scorers[key] = {
-                    "player": player_name,
-                    "team": team2,
-                    "goals": 0
-                }
-
-            scorers[key]["goals"] += 1
+                scorers[key]["goals"] += 1
 
     return sorted(
         scorers.values(),
@@ -211,31 +178,26 @@ def build_top_scorers(matches):
     )
 
 
-def normalize_squads(raw_data):
+def normalize_squads(raw):
     squads = {}
 
-    if isinstance(raw_data, dict):
-        if "squads" in raw_data:
-            squad_items = raw_data.get("squads", [])
-        elif "teams" in raw_data:
-            squad_items = raw_data.get("teams", [])
+    if isinstance(raw, dict):
+        if isinstance(raw.get("squads"), list):
+            items = raw["squads"]
+        elif isinstance(raw.get("teams"), list):
+            items = raw["teams"]
         else:
-            squad_items = []
-            for team_name, players in raw_data.items():
-                squad_items.append({
-                    "team": team_name,
-                    "players": players
-                })
-    elif isinstance(raw_data, list):
-        squad_items = raw_data
+            items = [{"team": k, "players": v} for k, v in raw.items()]
+    elif isinstance(raw, list):
+        items = raw
     else:
-        squad_items = []
+        items = []
 
-    for item in squad_items:
+    for item in items:
         if not isinstance(item, dict):
             continue
 
-        team_name = (
+        team = (
             item.get("team")
             or item.get("name")
             or item.get("title")
@@ -243,62 +205,45 @@ def normalize_squads(raw_data):
             or "Unknown Team"
         )
 
-        players = (
-            item.get("players")
-            or item.get("squad")
-            or item.get("roster")
-            or []
-        )
-
-        normalized_players = []
+        players = item.get("players") or item.get("squad") or item.get("roster") or []
+        normalized = []
 
         if isinstance(players, list):
             for player in players:
                 if isinstance(player, str):
-                    normalized_players.append({
+                    normalized.append({
                         "name": player,
-                        "position": "",
-                        "number": ""
+                        "number": "",
+                        "position": ""
                     })
                 elif isinstance(player, dict):
-                    normalized_players.append({
-                        "name": player.get("name", player.get("player", "Unknown")),
-                        "position": player.get("position", player.get("pos", "")),
-                        "number": player.get("number", player.get("no", ""))
+                    normalized.append({
+                        "name": player.get("name") or player.get("player") or "Unknown",
+                        "number": player.get("number") or player.get("no") or "",
+                        "position": player.get("position") or player.get("pos") or ""
                     })
 
-        squads[team_name] = normalized_players
+        squads[team] = normalized
 
     return squads
 
 
-def build_match_rows(matches, include_score=False, include_round=False, include_status=False):
+def rows_for_matches(matches, score=False, round_col=False, status=False):
     rows = ""
 
     for match in matches:
-        status = "Completed" if is_completed(match) else "Upcoming"
-
-        round_td = ""
-        if include_round:
-            round_td = f"<td>{escape(match.get('round', ''))}</td>"
-
-        score_td = ""
-        if include_score:
-            score_td = f"<td><span class='score-badge'>{escape(get_score(match))}</span></td>"
-
-        status_td = ""
-        if include_status:
-            status_td = f"<td>{escape(status)}</td>"
+        match_text = f"{match.get('team1', '')} vs {match.get('team2', '')}"
+        search_text = f"{match.get('team1', '')} {match.get('team2', '')} {match.get('group', '')}".lower()
 
         rows += f"""
-        <tr>
-            {round_td}
+        <tr data-search="{escape(search_text)}">
+            {f"<td>{escape(match.get('round', ''))}</td>" if round_col else ""}
             <td>{escape(match.get('date', ''))}</td>
-            <td>{escape(convert_to_ist(match.get('date', ''), match.get('time', '')))}</td>
-            <td><span class="group-badge">{escape(match.get('group', ''))}</span></td>
-            <td>{escape(match.get('team1', ''))} vs {escape(match.get('team2', ''))}</td>
-            {score_td}
-            {status_td}
+            <td>{escape(ist_text(match))}</td>
+            <td><span class="badge blue">{escape(match.get('group', ''))}</span></td>
+            <td class="match-name">{escape(match_text)}</td>
+            {f"<td><span class='badge green'>{escape(score_text(match))}</span></td>" if score else ""}
+            {f"<td>{'Completed' if completed(match) else 'Upcoming'}</td>" if status else ""}
             <td>{escape(match.get('ground', ''))}</td>
         </tr>
         """
@@ -308,72 +253,58 @@ def build_match_rows(matches, include_score=False, include_round=False, include_
 
 @app.route("/")
 def home():
-    return world_cup_tracker()
+    return world_cup_2026()
 
 
 @app.route("/world-cup-2026")
-def world_cup_tracker():
-    matches = get_matches_from_api()
+def world_cup_2026():
+    matches = get_matches()
 
-    sorted_matches = sorted(
-        matches,
-        key=get_match_datetime_for_sorting
-    )
+    all_matches = sorted(matches, key=match_sort_key)
+    done_matches = sorted([m for m in matches if completed(m)], key=match_sort_key)
+    upcoming_matches = sorted([m for m in matches if not completed(m)], key=match_sort_key)
 
-    completed_matches = sorted(
-        [match for match in matches if is_completed(match)],
-        key=get_match_datetime_for_sorting
-    )
+    today = datetime.now(IST).date()
+    tomorrow = today + timedelta(days=1)
 
-    upcoming_matches = sorted(
-        [match for match in matches if not is_completed(match)],
-        key=get_match_datetime_for_sorting
-    )
+    today_matches = [m for m in all_matches if ist_date(m) == today]
+    tomorrow_matches = [m for m in all_matches if ist_date(m) == tomorrow]
 
     standings = build_points_table(matches)
-    top_scorers = build_top_scorers(matches)
-    squads = normalize_squads(get_squads_from_api())
+    scorers = build_top_scorers(matches)
+    squads = normalize_squads(get_squads_raw())
 
-    completed_rows = build_match_rows(
-        completed_matches,
-        include_score=True
-    )
-
-    upcoming_rows = build_match_rows(
-        upcoming_matches
-    )
-
-    all_fixtures_rows = build_match_rows(
-        sorted_matches,
-        include_score=True,
-        include_round=True,
-        include_status=True
-    )
+    today_rows = rows_for_matches(today_matches, score=True)
+    tomorrow_rows = rows_for_matches(tomorrow_matches, score=True)
+    completed_rows = rows_for_matches(done_matches, score=True)
+    upcoming_rows = rows_for_matches(upcoming_matches)
+    fixtures_rows = rows_for_matches(all_matches, score=True, round_col=True, status=True)
 
     points_html = ""
 
     for group in sorted(standings.keys()):
         points_html += f"""
         <h3 class="group-title">{escape(group)}</h3>
-        <table>
-            <tr>
-                <th>Pos</th>
-                <th>Team</th>
-                <th>P</th>
-                <th>W</th>
-                <th>D</th>
-                <th>L</th>
-                <th>GF</th>
-                <th>GA</th>
-                <th>GD</th>
-                <th>Pts</th>
-            </tr>
+        <div class="table-wrap">
+            <table>
+                <tr>
+                    <th>Pos</th>
+                    <th>Team</th>
+                    <th>P</th>
+                    <th>W</th>
+                    <th>D</th>
+                    <th>L</th>
+                    <th>GF</th>
+                    <th>GA</th>
+                    <th>GD</th>
+                    <th>Pts</th>
+                </tr>
         """
 
-        for position, team in enumerate(standings[group], start=1):
+        for pos, team in enumerate(standings[group], start=1):
             points_html += f"""
             <tr>
-                <td>{position}</td>
+                <td>{pos}</td>
                 <td>{escape(team['team'])}</td>
                 <td>{team['played']}</td>
                 <td>{team['won']}</td>
@@ -382,46 +313,50 @@ def world_cup_tracker():
                 <td>{team['gf']}</td>
                 <td>{team['ga']}</td>
                 <td>{team['gd']}</td>
-                <td><span class="points-badge">{team['points']}</span></td>
+                <td><span class="badge gold">{team['points']}</span></td>
             </tr>
             """
 
-        points_html += "</table>"
+        points_html += """
+            </table>
+        </div>
+        """
 
-    top_scorers_rows = ""
+    scorers_rows = ""
 
-    for rank, scorer in enumerate(top_scorers, start=1):
-        top_scorers_rows += f"""
+    for rank, scorer in enumerate(scorers, start=1):
+        scorers_rows += f"""
         <tr>
             <td>{rank}</td>
             <td>{escape(scorer['player'])}</td>
             <td>{escape(scorer['team'])}</td>
-            <td><span class="score-badge">{scorer['goals']}</span></td>
+            <td><span class="badge green">{scorer['goals']}</span></td>
         </tr>
         """
 
-    if not top_scorers_rows:
-        top_scorers_rows = """
+    if not scorers_rows:
+        scorers_rows = """
         <tr>
-            <td colspan="4">No goal data available yet.</td>
+            <td colspan="4">No goal scorer data available yet.</td>
         </tr>
         """
 
     players_html = ""
 
     if squads:
-        for team_name in sorted(squads.keys()):
+        for team in sorted(squads.keys()):
             players_html += f"""
-            <h3 class="group-title">{escape(team_name)}</h3>
-            <table>
-                <tr>
-                    <th>No</th>
-                    <th>Player</th>
-                    <th>Position</th>
-                </tr>
+            <h3 class="group-title">{escape(team)}</h3>
+            <div class="table-wrap">
+                <table>
+                    <tr>
+                        <th>No</th>
+                        <th>Player</th>
+                        <th>Position</th>
+                    </tr>
             """
 
-            for player in squads[team_name]:
+            for player in squads[team]:
                 players_html += f"""
                 <tr>
                     <td>{escape(str(player.get('number', '')))}</td>
@@ -430,41 +365,14 @@ def world_cup_tracker():
                 </tr>
                 """
 
-            players_html += "</table>"
+            players_html += """
+                </table>
+            </div>
+            """
     else:
         players_html = """
-        <div class="info-box">
-            Player squad data is not available from the current free source at this moment.
-        </div>
-        """
-
-    lineup_html = ""
-
-    for match in upcoming_matches[:8]:
-        lineup_html += f"""
-        <div class="lineup-card">
-            <h3>{escape(match.get('team1', ''))} vs {escape(match.get('team2', ''))}</h3>
-            <p><b>Kickoff:</b> {escape(convert_to_ist(match.get('date', ''), match.get('time', '')))}</p>
-            <p><b>Venue:</b> {escape(match.get('ground', ''))}</p>
-
-            <div class="pitch">
-                <div class="pitch-line">Goalkeeper</div>
-                <div class="pitch-line">Defenders</div>
-                <div class="pitch-line">Midfielders</div>
-                <div class="pitch-line">Forwards</div>
-            </div>
-
-            <p class="lineup-note">
-                Official starting XI is not available from the current free JSON source.
-                Official lineup needs a lineup API.
-            </p>
-        </div>
-        """
-
-    if not lineup_html:
-        lineup_html = """
-        <div class="info-box">
-            No upcoming matches available for lineup preview.
+        <div class="empty">
+            Player squad data is not available from the free source currently.
         </div>
         """
 
@@ -473,238 +381,231 @@ def world_cup_tracker():
     <html>
     <head>
         <title>FIFA World Cup 2026 Tracker</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
 
         <style>
+            * {{
+                box-sizing: border-box;
+            }}
+
             body {{
                 margin: 0;
                 font-family: Arial, sans-serif;
-                background: #eef2f7;
-                color: #1f2937;
+                background: #eef4fb;
+                color: #0f172a;
             }}
 
-            .header {{
-                background: linear-gradient(135deg, #003b5c, #0077b6);
+            .hero {{
+                background: linear-gradient(135deg, #071b3a, #0057a8, #00a86b);
                 color: white;
-                padding: 30px;
-                text-align: center;
+                padding: 34px 22px 44px;
             }}
 
-            .header h1 {{
+            .hero-inner {{
+                max-width: 1180px;
+                margin: auto;
+                display: flex;
+                justify-content: space-between;
+                gap: 20px;
+                align-items: center;
+                flex-wrap: wrap;
+            }}
+
+            .hero h1 {{
                 margin: 0;
-                font-size: 36px;
+                font-size: 38px;
+                letter-spacing: .2px;
             }}
 
-            .header p {{
-                margin-top: 8px;
-                font-size: 16px;
+            .hero p {{
+                margin: 10px 0 0;
+                opacity: .92;
+            }}
+
+            .live-pill {{
+                background: rgba(255,255,255,.16);
+                border: 1px solid rgba(255,255,255,.35);
+                padding: 10px 16px;
+                border-radius: 999px;
+                font-weight: 700;
             }}
 
             .container {{
-                width: 95%;
-                margin: 25px auto;
+                max-width: 1180px;
+                margin: -28px auto 30px;
+                padding: 0 18px;
             }}
 
-            .summary {{
-                display: flex;
-                gap: 20px;
-                margin-bottom: 25px;
-                flex-wrap: wrap;
+            .cards {{
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 16px;
             }}
 
             .card {{
-                flex: 1;
-                min-width: 180px;
                 background: white;
+                border-radius: 18px;
                 padding: 20px;
-                border-radius: 12px;
-                box-shadow: 0 3px 12px rgba(0,0,0,0.08);
-                text-align: center;
+                box-shadow: 0 12px 28px rgba(15,23,42,.09);
             }}
 
-            .card h2 {{
-                margin: 0;
-                color: #0077b6;
-                font-size: 32px;
+            .card .num {{
+                font-size: 34px;
+                font-weight: 800;
+                color: #0057a8;
             }}
 
-            .card p {{
-                margin: 5px 0 0;
-                color: #555;
+            .card .label {{
+                color: #64748b;
+                margin-top: 3px;
             }}
 
-            .button-area {{
+            .toolbar {{
+                margin: 18px 0;
+                background: white;
+                border-radius: 18px;
+                padding: 14px;
+                box-shadow: 0 12px 28px rgba(15,23,42,.07);
+            }}
+
+            .tabs {{
                 display: flex;
-                gap: 15px;
-                justify-content: center;
-                margin: 25px 0;
+                gap: 10px;
                 flex-wrap: wrap;
             }}
 
-            .tab-button {{
-                background: #003b5c;
-                color: white;
-                border: none;
-                padding: 14px 22px;
-                border-radius: 25px;
-                font-size: 15px;
-                font-weight: bold;
+            button {{
+                border: 0;
                 cursor: pointer;
             }}
 
-            .tab-button:hover {{
-                background: #0077b6;
+            .tab {{
+                background: #e6eef8;
+                color: #0f3764;
+                padding: 12px 16px;
+                border-radius: 999px;
+                font-weight: 800;
             }}
 
-            .tab-button.active {{
-                background: #16a34a;
+            .tab.active {{
+                background: #00a86b;
+                color: white;
+            }}
+
+            .search {{
+                margin-top: 14px;
+                width: 100%;
+                padding: 14px 16px;
+                border-radius: 14px;
+                border: 1px solid #d8e2ee;
+                font-size: 15px;
             }}
 
             .section {{
                 display: none;
+                background: white;
+                border-radius: 20px;
+                padding: 18px;
+                box-shadow: 0 12px 28px rgba(15,23,42,.07);
+                margin-bottom: 22px;
             }}
 
             .section.active {{
                 display: block;
             }}
 
-            .section-title {{
-                margin-top: 30px;
-                padding-left: 10px;
-                border-left: 5px solid #0077b6;
-                color: #003b5c;
+            .section h2 {{
+                margin: 0 0 14px;
+                color: #082f5f;
             }}
 
-            .group-title {{
-                margin-top: 25px;
-                color: #003b5c;
-            }}
-
-            .table-wrapper {{
+            .table-wrap {{
                 overflow-x: auto;
             }}
 
             table {{
                 width: 100%;
                 border-collapse: collapse;
-                background: white;
-                border-radius: 12px;
-                overflow: hidden;
-                box-shadow: 0 3px 12px rgba(0,0,0,0.08);
-                margin-top: 12px;
-                margin-bottom: 25px;
+                min-width: 760px;
             }}
 
             th {{
-                background: #003b5c;
+                background: #082f5f;
                 color: white;
-                padding: 14px;
                 text-align: left;
-                font-size: 14px;
+                padding: 13px;
             }}
 
             td {{
                 padding: 13px;
-                border-bottom: 1px solid #e5e7eb;
-                font-size: 14px;
+                border-bottom: 1px solid #e8eef5;
             }}
 
             tr:hover {{
-                background: #f3f8ff;
+                background: #f6fbff;
             }}
 
-            .score-badge {{
-                background: #16a34a;
-                color: white;
-                padding: 6px 12px;
-                border-radius: 20px;
-                font-weight: bold;
-            }}
-
-            .points-badge {{
-                background: #f59e0b;
-                color: white;
-                padding: 6px 12px;
-                border-radius: 20px;
-                font-weight: bold;
-            }}
-
-            .group-badge {{
-                background: #e0f2fe;
-                color: #0369a1;
+            .badge {{
+                display: inline-block;
                 padding: 6px 10px;
-                border-radius: 20px;
-                font-weight: bold;
+                border-radius: 999px;
+                font-weight: 800;
                 font-size: 12px;
             }}
 
-            .info-box {{
-                background: white;
+            .blue {{
+                background: #dff1ff;
+                color: #075985;
+            }}
+
+            .green {{
+                background: #dcfce7;
+                color: #166534;
+            }}
+
+            .gold {{
+                background: #fef3c7;
+                color: #92400e;
+            }}
+
+            .match-name {{
+                font-weight: 750;
+            }}
+
+            .group-title {{
+                color: #075985;
+                margin: 20px 0 10px;
+            }}
+
+            .empty {{
                 padding: 20px;
-                border-radius: 12px;
-                box-shadow: 0 3px 12px rgba(0,0,0,0.08);
-                margin-top: 15px;
-            }}
-
-            .lineup-card {{
-                background: white;
-                padding: 20px;
-                border-radius: 12px;
-                box-shadow: 0 3px 12px rgba(0,0,0,0.08);
-                margin-bottom: 25px;
-            }}
-
-            .pitch {{
-                background: linear-gradient(135deg, #15803d, #22c55e);
-                color: white;
-                border-radius: 18px;
-                padding: 20px;
-                margin-top: 15px;
-                min-height: 250px;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-around;
-                text-align: center;
-                border: 4px solid white;
-            }}
-
-            .pitch-line {{
-                background: rgba(255,255,255,0.18);
-                padding: 12px;
-                border-radius: 20px;
-                font-weight: bold;
-            }}
-
-            .lineup-note {{
-                color: #555;
-                font-size: 14px;
+                background: #f8fafc;
+                border-radius: 14px;
+                color: #64748b;
             }}
 
             .footer {{
                 text-align: center;
-                margin: 30px;
-                color: #666;
-                font-size: 13px;
+                color: #64748b;
+                padding: 25px;
             }}
 
-            @media (max-width: 768px) {{
-                .summary {{
-                    flex-direction: column;
+            @media (max-width: 850px) {{
+                .cards {{
+                    grid-template-columns: repeat(2, 1fr);
                 }}
 
-                table {{
-                    font-size: 12px;
-                    min-width: 750px;
+                .hero h1 {{
+                    font-size: 30px;
+                }}
+            }}
+
+            @media (max-width: 520px) {{
+                .cards {{
+                    grid-template-columns: 1fr;
                 }}
 
-                th, td {{
-                    padding: 8px;
-                }}
-
-                .header h1 {{
-                    font-size: 26px;
-                }}
-
-                .tab-button {{
+                .tab {{
                     width: 100%;
                 }}
             }}
@@ -712,61 +613,113 @@ def world_cup_tracker():
 
         <script>
             function showSection(sectionId, buttonId) {{
-                const sections = document.querySelectorAll(".section");
-                const buttons = document.querySelectorAll(".tab-button");
+                document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+                document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
 
-                sections.forEach(section => section.classList.remove("active"));
-                buttons.forEach(button => button.classList.remove("active"));
+                document.getElementById(sectionId).classList.add('active');
+                document.getElementById(buttonId).classList.add('active');
+            }}
 
-                document.getElementById(sectionId).classList.add("active");
-                document.getElementById(buttonId).classList.add("active");
+            function filterRows() {{
+                const value = document.getElementById('teamSearch').value.toLowerCase();
+
+                document.querySelectorAll('tr[data-search]').forEach(row => {{
+                    row.style.display = row.getAttribute('data-search').includes(value) ? '' : 'none';
+                }});
             }}
         </script>
     </head>
 
     <body>
-        <div class="header">
-            <h1>FIFA World Cup 2026 Tracker</h1>
-            <p>Fixtures, results, points table, top scorers and squad list</p>
+        <div class="hero">
+            <div class="hero-inner">
+                <div>
+                    <h1>FIFA World Cup 2026 Tracker</h1>
+                    <p>Fixtures, results, Indian time, points table, top scorers and squads</p>
+                </div>
+
+                <div class="live-pill">
+                    Updated from online JSON source
+                </div>
+            </div>
         </div>
 
-        <div class="container">
+        <main class="container">
 
-            <div class="summary">
+            <div class="cards">
                 <div class="card">
-                    <h2>{len(matches)}</h2>
-                    <p>Total Fixtures</p>
+                    <div class="num">{len(matches)}</div>
+                    <div class="label">Total Fixtures</div>
                 </div>
 
                 <div class="card">
-                    <h2>{len(completed_matches)}</h2>
-                    <p>Completed</p>
+                    <div class="num">{len(done_matches)}</div>
+                    <div class="label">Completed</div>
                 </div>
 
                 <div class="card">
-                    <h2>{len(upcoming_matches)}</h2>
-                    <p>Upcoming</p>
+                    <div class="num">{len(upcoming_matches)}</div>
+                    <div class="label">Upcoming</div>
                 </div>
 
                 <div class="card">
-                    <h2>{len(top_scorers)}</h2>
-                    <p>Goal Scorers</p>
+                    <div class="num">{len(today_matches)}</div>
+                    <div class="label">Today in IST</div>
                 </div>
             </div>
 
-            <div class="button-area">
-                <button id="completed-btn" class="tab-button active" onclick="showSection('completed-section', 'completed-btn')">Completed Matches</button>
-                <button id="upcoming-btn" class="tab-button" onclick="showSection('upcoming-section', 'upcoming-btn')">Upcoming Matches</button>
-                <button id="fixtures-btn" class="tab-button" onclick="showSection('fixtures-section', 'fixtures-btn')">All Fixtures</button>
-                <button id="points-btn" class="tab-button" onclick="showSection('points-section', 'points-btn')">Points Table</button>
-                <button id="scorers-btn" class="tab-button" onclick="showSection('scorers-section', 'scorers-btn')">Top Scorers</button>
-                <button id="players-btn" class="tab-button" onclick="showSection('players-section', 'players-btn')">Players List</button>
-                <button id="lineup-btn" class="tab-button" onclick="showSection('lineup-section', 'lineup-btn')">Lineup</button>
+            <div class="toolbar">
+                <div class="tabs">
+                    <button id="today-btn" class="tab active" onclick="showSection('today-section','today-btn')">Today’s Matches</button>
+                    <button id="tomorrow-btn" class="tab" onclick="showSection('tomorrow-section','tomorrow-btn')">Tomorrow</button>
+                    <button id="completed-btn" class="tab" onclick="showSection('completed-section','completed-btn')">Completed</button>
+                    <button id="upcoming-btn" class="tab" onclick="showSection('upcoming-section','upcoming-btn')">Upcoming</button>
+                    <button id="fixtures-btn" class="tab" onclick="showSection('fixtures-section','fixtures-btn')">All Fixtures</button>
+                    <button id="points-btn" class="tab" onclick="showSection('points-section','points-btn')">Points Table</button>
+                    <button id="scorers-btn" class="tab" onclick="showSection('scorers-section','scorers-btn')">Top Scorers</button>
+                    <button id="players-btn" class="tab" onclick="showSection('players-section','players-btn')">Players List</button>
+                </div>
+
+                <input id="teamSearch" onkeyup="filterRows()" class="search" placeholder="Search team or group, e.g. Brazil, Argentina, Group A">
             </div>
 
-            <div id="completed-section" class="section active">
-                <h2 class="section-title">Completed Matches</h2>
-                <div class="table-wrapper">
+            <section id="today-section" class="section active">
+                <h2>Today’s Matches</h2>
+                <div class="table-wrap">
+                    <table>
+                        <tr>
+                            <th>Date</th>
+                            <th>Indian Time</th>
+                            <th>Group/Round</th>
+                            <th>Match</th>
+                            <th>Score/Status</th>
+                            <th>Venue</th>
+                        </tr>
+                        {today_rows}
+                    </table>
+                </div>
+            </section>
+
+            <section id="tomorrow-section" class="section">
+                <h2>Tomorrow’s Matches</h2>
+                <div class="table-wrap">
+                    <table>
+                        <tr>
+                            <th>Date</th>
+                            <th>Indian Time</th>
+                            <th>Group/Round</th>
+                            <th>Match</th>
+                            <th>Score/Status</th>
+                            <th>Venue</th>
+                        </tr>
+                        {tomorrow_rows}
+                    </table>
+                </div>
+            </section>
+
+            <section id="completed-section" class="section">
+                <h2>Completed Matches</h2>
+                <div class="table-wrap">
                     <table>
                         <tr>
                             <th>Date</th>
@@ -779,11 +732,11 @@ def world_cup_tracker():
                         {completed_rows}
                     </table>
                 </div>
-            </div>
+            </section>
 
-            <div id="upcoming-section" class="section">
-                <h2 class="section-title">Upcoming Matches</h2>
-                <div class="table-wrapper">
+            <section id="upcoming-section" class="section">
+                <h2>Upcoming Matches</h2>
+                <div class="table-wrap">
                     <table>
                         <tr>
                             <th>Date</th>
@@ -795,11 +748,11 @@ def world_cup_tracker():
                         {upcoming_rows}
                     </table>
                 </div>
-            </div>
+            </section>
 
-            <div id="fixtures-section" class="section">
-                <h2 class="section-title">All Fixtures Till Final</h2>
-                <div class="table-wrapper">
+            <section id="fixtures-section" class="section">
+                <h2>All Fixtures Till Final</h2>
+                <div class="table-wrap">
                     <table>
                         <tr>
                             <th>Round</th>
@@ -811,21 +764,19 @@ def world_cup_tracker():
                             <th>Status</th>
                             <th>Venue</th>
                         </tr>
-                        {all_fixtures_rows}
+                        {fixtures_rows}
                     </table>
                 </div>
-            </div>
+            </section>
 
-            <div id="points-section" class="section">
-                <h2 class="section-title">Points Table</h2>
-                <div class="table-wrapper">
-                    {points_html}
-                </div>
-            </div>
+            <section id="points-section" class="section">
+                <h2>Points Table</h2>
+                {points_html}
+            </section>
 
-            <div id="scorers-section" class="section">
-                <h2 class="section-title">Top Scorers</h2>
-                <div class="table-wrapper">
+            <section id="scorers-section" class="section">
+                <h2>Top Scorers</h2>
+                <div class="table-wrap">
                     <table>
                         <tr>
                             <th>Rank</th>
@@ -833,32 +784,20 @@ def world_cup_tracker():
                             <th>Team</th>
                             <th>Goals</th>
                         </tr>
-                        {top_scorers_rows}
+                        {scorers_rows}
                     </table>
                 </div>
-            </div>
+            </section>
 
-            <div id="players-section" class="section">
-                <h2 class="section-title">Players List</h2>
-                <div class="table-wrapper">
-                    {players_html}
-                </div>
-            </div>
-
-            <div id="lineup-section" class="section">
-                <h2 class="section-title">Lineup</h2>
-                <div class="info-box">
-                    Official lineup data is not available in the current free JSON source.
-                    This section shows upcoming matches in a pitch-style layout.
-                </div>
-                {lineup_html}
-            </div>
+            <section id="players-section" class="section">
+                <h2>Players List</h2>
+                {players_html}
+            </section>
 
             <div class="footer">
                 Data source: OpenFootball World Cup 2026 JSON. Time converted to Indian Standard Time.
             </div>
-
-        </div>
+        </main>
     </body>
     </html>
     """
@@ -866,22 +805,22 @@ def world_cup_tracker():
 
 @app.route("/api/matches")
 def api_matches():
-    return jsonify(get_matches_from_api())
+    return jsonify(get_matches())
 
 
 @app.route("/api/standings")
 def api_standings():
-    return jsonify(build_points_table(get_matches_from_api()))
+    return jsonify(build_points_table(get_matches()))
 
 
 @app.route("/api/top-scorers")
 def api_top_scorers():
-    return jsonify(build_top_scorers(get_matches_from_api()))
+    return jsonify(build_top_scorers(get_matches()))
 
 
 @app.route("/api/squads")
 def api_squads():
-    return jsonify(normalize_squads(get_squads_from_api()))
+    return jsonify(normalize_squads(get_squads_raw()))
 
 
 if __name__ == "__main__":
