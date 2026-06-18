@@ -26,14 +26,10 @@ COUNTRY_CODES = {
 
 
 def flag_img(team):
-    country_code = COUNTRY_CODES.get(team)
-
-    if not country_code:
+    code = COUNTRY_CODES.get(team)
+    if not code:
         return ""
-
-    safe_team = escape(team)
-
-    return f'<img class="team-flag" src="https://flagcdn.com/24x18/{country_code}.png" alt="{safe_team} flag" loading="lazy">'
+    return f'<img class="team-flag" src="https://flagcdn.com/24x18/{code}.png" alt="{escape(team)} flag" loading="lazy">'
 
 
 def team_label(team):
@@ -66,7 +62,6 @@ def score_text(match):
     if completed(match):
         score = match["score"]["ft"]
         return f"{score[0]} - {score[1]}"
-
     return "Upcoming"
 
 
@@ -94,11 +89,7 @@ def sort_key(match):
 
 def ist_text(match):
     dt = match_datetime_ist(match)
-
-    if not dt:
-        return "TBA"
-
-    return dt.strftime("%d %b %Y, %I:%M %p IST")
+    return dt.strftime("%d %b %Y, %I:%M %p IST") if dt else "TBA"
 
 
 def ist_date(match):
@@ -281,40 +272,36 @@ def match_cards(matches, show_score=False, show_round=False, show_status=False, 
 
         search_text = f"{team1} {team2} {match.get('group', '')} {match.get('round', '')} {scorer_details}".lower()
 
-        score_html = ""
-        if show_score:
-            score_html = f"<div class='score-pill'>{escape(score_text(match))}</div>"
+        score_html = f"<span class='score-pill'>{escape(score_text(match))}</span>" if show_score else ""
 
         round_html = ""
         if show_round:
-            round_html = f"<div class='meta-line'><span>Round</span><b>{escape(match.get('round', ''))}</b></div>"
+            round_html = f"<div class='match-info'><span>Round</span><b>{escape(match.get('round', ''))}</b></div>"
 
         status_html = ""
         if show_status:
-            status_html = f"<div class='meta-line'><span>Status</span><b>{'Completed' if completed(match) else 'Upcoming'}</b></div>"
+            status_html = f"<div class='match-info'><span>Status</span><b>{'Completed' if completed(match) else 'Upcoming'}</b></div>"
 
         scorers_html = ""
         if show_scorers:
-            scorers_html = f"<div class='meta-line full'><span>Goal Scorers</span><b>{escape(scorer_details)}</b></div>"
+            scorers_html = f"<div class='match-info full'><span>Goal Scorers</span><b>{escape(scorer_details)}</b></div>"
 
         cards += f"""
         <div class="match-card" data-search="{escape(search_text)}">
-            <div class="match-top">
-                <div class="match-teams">
-                    {team_label(team1)}
-                    <br><small>vs</small><br>
-                    {team_label(team2)}
-                </div>
-                {score_html}
+            <div class="match-main-row">
+                <div class="team-name">{team_label(team1)}</div>
+                <div class="vs-text">vs</div>
+                <div class="team-name">{team_label(team2)}</div>
+                <div class="match-score">{score_html}</div>
             </div>
 
-            <div class="match-meta">
+            <div class="match-details-grid">
                 {round_html}
-                <div class="meta-line"><span>Date</span><b>{escape(match.get('date', ''))}</b></div>
-                <div class="meta-line"><span>Indian Time</span><b>{escape(ist_text(match))}</b></div>
-                <div class="meta-line"><span>Group</span><b>{escape(match.get('group', ''))}</b></div>
+                <div class="match-info"><span>Date</span><b>{escape(match.get('date', ''))}</b></div>
+                <div class="match-info"><span>Indian Time</span><b>{escape(ist_text(match))}</b></div>
+                <div class="match-info"><span>Group</span><b>{escape(match.get('group', ''))}</b></div>
                 {status_html}
-                <div class="meta-line full"><span>Venue</span><b>{escape(match.get('ground', ''))}</b></div>
+                <div class="match-info full"><span>Venue</span><b>{escape(match.get('ground', ''))}</b></div>
                 {scorers_html}
             </div>
         </div>
@@ -329,7 +316,7 @@ def scorer_cards(scorers):
 
     html = ""
 
-    for rank, scorer in enumerate(scorers, start=1):
+    for rank, scorer in enumerate(scorers[:10], start=1):
         search_text = f"{scorer['player']} {scorer['team']}".lower()
 
         html += f"""
@@ -346,47 +333,74 @@ def scorer_cards(scorers):
     return html
 
 
-def points_cards(standings):
+def points_tables(standings):
     html = ""
 
     for group in sorted(standings.keys()):
-        html += f"<h3 class='group-title'>{escape(group)}</h3>"
+        html += f"""
+        <h3 class="group-title">{escape(group)}</h3>
+        <div class="table-wrap">
+            <table class="points-table">
+                <tr>
+                    <th>Pos</th>
+                    <th>Team</th>
+                    <th>P</th>
+                    <th>W</th>
+                    <th>D</th>
+                    <th>L</th>
+                    <th>GF</th>
+                    <th>GA</th>
+                    <th>GD</th>
+                    <th>Pts</th>
+                </tr>
+        """
 
         for pos, team in enumerate(standings[group], start=1):
             team_name = team["team"]
             search_text = f"{team_name} {group}".lower()
 
             html += f"""
-            <div class="points-card" data-search="{escape(search_text)}">
-                <div>
-                    <b>{pos}. {team_label(team_name)}</b>
-                    <span>P {team['played']} | W {team['won']} | D {team['drawn']} | L {team['lost']}</span>
-                </div>
-                <div>
-                    <span>GD {team['gd']}</span>
-                    <b class="score-pill gold-pill">{team['points']} pts</b>
-                </div>
-            </div>
+            <tr data-search="{escape(search_text)}">
+                <td>{pos}</td>
+                <td>{team_label(team_name)}</td>
+                <td>{team['played']}</td>
+                <td>{team['won']}</td>
+                <td>{team['drawn']}</td>
+                <td>{team['lost']}</td>
+                <td>{team['gf']}</td>
+                <td>{team['ga']}</td>
+                <td>{team['gd']}</td>
+                <td><b>{team['points']}</b></td>
+            </tr>
             """
+
+        html += """
+            </table>
+        </div>
+        """
 
     return html or "<div class='empty-card'>Points table not available.</div>"
 
 
-def player_cards(squads):
+def player_dropdown_html(squads):
     if not squads:
         return "<div class='empty-card'>Player squad data is not available from the free source currently.</div>"
 
-    html = ""
+    options = '<option value="">Select country</option>'
+    cards = ""
 
     for team in sorted(squads.keys()):
-        html += f"<h3 class='group-title'>{team_label(team)}</h3>"
+        safe_team = escape(team)
+        options += f'<option value="{safe_team}">{safe_team}</option>'
+        cards += f'<div class="player-team-block" data-team="{safe_team}" style="display:none;">'
+        cards += f'<h3 class="group-title">{team_label(team)}</h3>'
 
         for player in squads[team]:
             search_text = f"{player.get('name', '')} {player.get('position', '')} {team}".lower()
             number = player.get("number", "")
             position = player.get("position", "") or "Position not available"
 
-            html += f"""
+            cards += f"""
             <div class="mini-card" data-search="{escape(search_text)}">
                 <div class="rank">{escape(str(number))}</div>
                 <div>
@@ -397,7 +411,17 @@ def player_cards(squads):
             </div>
             """
 
-    return html
+        cards += "</div>"
+
+    return f"""
+    <select id="teamSelect" class="team-select" onchange="showPlayersByTeam()">
+        {options}
+    </select>
+
+    <div id="playerHint" class="empty-card">Select a country to view players.</div>
+
+    {cards}
+    """
 
 
 @app.route("/")
@@ -411,7 +435,6 @@ def world_cup_2026():
 
     all_matches = sorted(matches, key=sort_key)
     completed_matches = sorted([m for m in matches if completed(m)], key=sort_key)
-    recent_matches = list(reversed(completed_matches[-8:]))
     upcoming_matches = sorted([m for m in matches if not completed(m)], key=sort_key)
 
     today = datetime.now(IST).date()
@@ -421,7 +444,7 @@ def world_cup_2026():
     tomorrow_matches = [m for m in all_matches if ist_date(m) == tomorrow]
 
     standings = build_points_table(matches)
-    scorers = build_top_scorers(matches)
+    top_scorers = build_top_scorers(matches)
     squads = normalize_squads(get_squads_raw())
 
     return f"""
@@ -446,12 +469,12 @@ def world_cup_2026():
             .hero {{
                 background: linear-gradient(135deg, #071b3a, #0057a8, #00a86b);
                 color: white;
-                padding: 16px 14px;
+                padding: 14px 12px;
             }}
 
             .hero h1 {{
                 margin: 0;
-                font-size: 24px;
+                font-size: 23px;
                 line-height: 1.2;
             }}
 
@@ -463,9 +486,9 @@ def world_cup_2026():
 
             .toolbar {{
                 background: white;
-                border-radius: 18px;
-                padding: 12px;
-                box-shadow: 0 8px 24px rgba(15,23,42,.08);
+                border-radius: 16px;
+                padding: 11px;
+                box-shadow: 0 8px 20px rgba(15,23,42,.08);
             }}
 
             .tabs {{
@@ -478,8 +501,8 @@ def world_cup_2026():
                 border: 0;
                 background: #e6eef8;
                 color: #0f3764;
-                padding: 12px 8px;
-                border-radius: 14px;
+                padding: 11px 8px;
+                border-radius: 13px;
                 font-weight: 900;
                 font-size: 13px;
                 cursor: pointer;
@@ -492,48 +515,36 @@ def world_cup_2026():
 
             .search {{
                 width: 100%;
-                margin-top: 12px;
-                padding: 13px;
-                border-radius: 14px;
+                margin-top: 10px;
+                padding: 12px;
+                border-radius: 13px;
                 border: 1px solid #d8e2ee;
                 font-size: 14px;
             }}
 
-            .cards {{
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 10px;
-                margin: 12px 0;
-            }}
-
-            .summary-card {{
-                background: white;
-                border-radius: 18px;
-                padding: 14px;
-                box-shadow: 0 8px 24px rgba(15,23,42,.08);
+            .stats-line {{
                 display: flex;
-                gap: 10px;
                 align-items: center;
+                gap: 8px;
+                overflow-x: auto;
+                white-space: nowrap;
+                background: white;
+                border-radius: 15px;
+                padding: 10px;
+                margin: 10px 0;
+                box-shadow: 0 8px 20px rgba(15,23,42,.08);
             }}
 
-            .summary-icon {{
-                width: 38px;
-                height: 38px;
-                border-radius: 13px;
-                background: #e0f2fe;
-                display: grid;
-                place-items: center;
-            }}
-
-            .summary-num {{
-                font-size: 26px;
-                color: #0057a8;
+            .stat-pill {{
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                font-size: 13px;
                 font-weight: 900;
-            }}
-
-            .summary-label {{
-                font-size: 12px;
-                color: #64748b;
+                color: #0f3764;
+                background: #f1f7fd;
+                padding: 7px 10px;
+                border-radius: 999px;
             }}
 
             .section {{
@@ -545,49 +556,55 @@ def world_cup_2026():
             }}
 
             .section-title {{
-                font-size: 22px;
+                font-size: 21px;
                 color: #082f5f;
                 margin: 14px 0 10px;
             }}
 
             .match-card,
             .mini-card,
-            .points-card,
             .empty-card {{
                 background: white;
-                border-radius: 18px;
-                padding: 14px;
-                margin-bottom: 12px;
-                box-shadow: 0 8px 24px rgba(15,23,42,.08);
+                border-radius: 16px;
+                padding: 13px;
+                margin-bottom: 11px;
+                box-shadow: 0 8px 20px rgba(15,23,42,.08);
             }}
 
-            .match-top {{
-                display: flex;
-                justify-content: space-between;
-                gap: 10px;
-                align-items: flex-start;
+            .match-main-row {{
+                display: grid;
+                grid-template-columns: 1fr auto 1fr;
+                gap: 8px;
+                align-items: center;
             }}
 
-            .match-teams {{
-                font-size: 18px;
-                line-height: 1.35;
+            .team-name {{
+                font-size: 16px;
                 font-weight: 900;
+                line-height: 1.3;
             }}
 
-            .match-teams small {{
+            .vs-text {{
                 color: #64748b;
                 font-size: 12px;
-                font-weight: 700;
+                font-weight: 900;
+                text-align: center;
+            }}
+
+            .match-score {{
+                grid-column: 1 / 4;
+                margin-top: 8px;
             }}
 
             .score-pill {{
                 display: inline-block;
                 background: #dcfce7;
                 color: #166534;
-                padding: 7px 11px;
+                padding: 6px 10px;
                 border-radius: 999px;
                 font-weight: 900;
                 white-space: nowrap;
+                font-size: 13px;
             }}
 
             .gold-pill {{
@@ -595,56 +612,47 @@ def world_cup_2026():
                 color: #92400e;
             }}
 
-            .match-meta {{
+            .match-details-grid {{
                 margin-top: 10px;
                 display: grid;
+                grid-template-columns: 1fr 1fr;
                 gap: 8px;
             }}
 
-            .meta-line {{
-                display: flex;
-                justify-content: space-between;
-                gap: 12px;
-                border-top: 1px solid #eef2f7;
-                padding-top: 8px;
+            .match-info {{
+                background: #f8fafc;
+                border-radius: 12px;
+                padding: 8px;
             }}
 
-            .meta-line span {{
+            .match-info span {{
+                display: block;
                 color: #64748b;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 800;
+                margin-bottom: 3px;
             }}
 
-            .meta-line b {{
-                text-align: right;
-                font-size: 13px;
+            .match-info b {{
+                font-size: 12px;
             }}
 
-            .meta-line.full {{
-                display: block;
+            .match-info.full {{
+                grid-column: 1 / 3;
             }}
 
-            .meta-line.full b {{
-                display: block;
-                text-align: left;
-                margin-top: 3px;
-            }}
-
-            .mini-card,
-            .points-card {{
+            .mini-card {{
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 gap: 12px;
             }}
 
-            .mini-card b,
-            .points-card b {{
+            .mini-card b {{
                 display: block;
             }}
 
-            .mini-card span,
-            .points-card span {{
+            .mini-card span {{
                 display: block;
                 color: #64748b;
                 font-size: 12px;
@@ -677,9 +685,48 @@ def world_cup_2026():
                 box-shadow: 0 1px 3px rgba(0,0,0,.18);
             }}
 
-            @media (min-width:800px) {{
+            .table-wrap {{
+                overflow-x: auto;
+                background: white;
+                border-radius: 14px;
+                box-shadow: 0 8px 20px rgba(15,23,42,.08);
+                margin-bottom: 12px;
+            }}
+
+            .points-table {{
+                width: 100%;
+                border-collapse: collapse;
+                min-width: 640px;
+            }}
+
+            .points-table th {{
+                background: #082f5f;
+                color: white;
+                padding: 10px;
+                text-align: left;
+                font-size: 12px;
+            }}
+
+            .points-table td {{
+                padding: 10px;
+                border-bottom: 1px solid #e8eef5;
+                font-size: 12px;
+            }}
+
+            .team-select {{
+                width: 100%;
+                padding: 13px;
+                border-radius: 13px;
+                border: 1px solid #d8e2ee;
+                background: white;
+                font-size: 14px;
+                font-weight: 800;
+                margin-bottom: 12px;
+            }}
+
+            @media (min-width: 800px) {{
                 .hero {{
-                    padding: 20px 22px 22px;
+                    padding: 20px 22px;
                 }}
 
                 .hero h1 {{
@@ -700,16 +747,26 @@ def world_cup_2026():
                     padding: 12px 16px;
                 }}
 
-                .cards {{
-                    grid-template-columns: repeat(4, 1fr);
+                .match-score {{
+                    grid-column: auto;
+                    margin-top: 0;
+                    text-align: right;
+                }}
+
+                .match-main-row {{
+                    grid-template-columns: 1fr auto 1fr auto;
+                }}
+
+                .stats-line {{
+                    justify-content: flex-start;
                 }}
             }}
         </style>
 
         <script>
             function showSection(sectionId, buttonId) {{
-                document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-                document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.section').forEach(section => section.classList.remove('active'));
+                document.querySelectorAll('.tab').forEach(button => button.classList.remove('active'));
 
                 document.getElementById(sectionId).classList.add('active');
                 document.getElementById(buttonId).classList.add('active');
@@ -722,6 +779,16 @@ def world_cup_2026():
                     card.style.display = card.getAttribute('data-search').includes(value) ? '' : 'none';
                 }});
             }}
+
+            function showPlayersByTeam() {{
+                const selected = document.getElementById('teamSelect').value;
+
+                document.querySelectorAll('.player-team-block').forEach(block => {{
+                    block.style.display = block.getAttribute('data-team') === selected ? 'block' : 'none';
+                }});
+
+                document.getElementById('playerHint').style.display = selected ? 'none' : 'block';
+            }}
         </script>
     </head>
 
@@ -733,68 +800,34 @@ def world_cup_2026():
         <main class="container">
             <div class="toolbar">
                 <div class="tabs">
-                    <button id="today-btn" class="tab active" onclick="showSection('today','today-btn')">📅 Today</button>
-                    <button id="tomorrow-btn" class="tab" onclick="showSection('tomorrow','tomorrow-btn')">🗓️ Tomorrow</button>
-                    <button id="recent-btn" class="tab" onclick="showSection('recent','recent-btn')">⚡ Recent</button>
+                    <button id="today-btn" class="tab active" onclick="showSection('today','today-btn')">📅 Matches Today</button>
+                    <button id="tomorrow-btn" class="tab" onclick="showSection('tomorrow','tomorrow-btn')">🗓️ Matches Tomorrow</button>
                     <button id="completed-btn" class="tab" onclick="showSection('completed','completed-btn')">✅ Completed</button>
                     <button id="upcoming-btn" class="tab" onclick="showSection('upcoming','upcoming-btn')">⏳ Upcoming</button>
                     <button id="fixtures-btn" class="tab" onclick="showSection('fixtures','fixtures-btn')">🏟️ Fixtures</button>
-                    <button id="points-btn" class="tab" onclick="showSection('points','points-btn')">📊 Points</button>
-                    <button id="scorers-btn" class="tab" onclick="showSection('scorers','scorers-btn')">🥅 Scorers</button>
-                    <button id="goals-btn" class="tab" onclick="showSection('goals','goals-btn')">⚽ Goals</button>
-                    <button id="players-btn" class="tab" onclick="showSection('players','players-btn')">👥 Players</button>
+                    <button id="points-btn" class="tab" onclick="showSection('points','points-btn')">📊 Points Table</button>
+                    <button id="scorers-btn" class="tab" onclick="showSection('scorers','scorers-btn')">🥅 Top Scorers</button>
+                    <button id="players-btn" class="tab" onclick="showSection('players','players-btn')">👥 Players List</button>
                 </div>
 
                 <input id="searchBox" onkeyup="filterRows()" class="search" placeholder="Search team, group, player or goal scorer">
             </div>
 
-            <div class="cards">
-                <div class="summary-card">
-                    <div class="summary-icon">🏟️</div>
-                    <div>
-                        <div class="summary-num">{len(matches)}</div>
-                        <div class="summary-label">Total Fixtures</div>
-                    </div>
-                </div>
-
-                <div class="summary-card">
-                    <div class="summary-icon">✅</div>
-                    <div>
-                        <div class="summary-num">{len(completed_matches)}</div>
-                        <div class="summary-label">Completed</div>
-                    </div>
-                </div>
-
-                <div class="summary-card">
-                    <div class="summary-icon">⏳</div>
-                    <div>
-                        <div class="summary-num">{len(upcoming_matches)}</div>
-                        <div class="summary-label">Upcoming</div>
-                    </div>
-                </div>
-
-                <div class="summary-card">
-                    <div class="summary-icon">📅</div>
-                    <div>
-                        <div class="summary-num">{len(today_matches)}</div>
-                        <div class="summary-label">Today in IST</div>
-                    </div>
-                </div>
+            <div class="stats-line">
+                <span class="stat-pill">🏟️ Total Fixtures {len(matches)}</span>
+                <span class="stat-pill">✅ {len(completed_matches)} Completed</span>
+                <span class="stat-pill">⏳ {len(upcoming_matches)} Upcoming</span>
+                <span class="stat-pill">📅 {len(today_matches)} Today in IST</span>
             </div>
 
             <section id="today" class="section active">
-                <h2 class="section-title">📅 Today’s Matches</h2>
+                <h2 class="section-title">📅 Matches Today</h2>
                 {match_cards(today_matches, True, False, False, True)}
             </section>
 
             <section id="tomorrow" class="section">
-                <h2 class="section-title">🗓️ Tomorrow’s Matches</h2>
+                <h2 class="section-title">🗓️ Matches Tomorrow</h2>
                 {match_cards(tomorrow_matches, True)}
-            </section>
-
-            <section id="recent" class="section">
-                <h2 class="section-title">⚡ Recent Matches</h2>
-                {match_cards(recent_matches, True, False, False, True)}
             </section>
 
             <section id="completed" class="section">
@@ -808,28 +841,23 @@ def world_cup_2026():
             </section>
 
             <section id="fixtures" class="section">
-                <h2 class="section-title">🏟️ All Fixtures Till Final</h2>
+                <h2 class="section-title">🏟️ Fixtures</h2>
                 {match_cards(all_matches, True, True, True)}
             </section>
 
             <section id="points" class="section">
                 <h2 class="section-title">📊 Points Table</h2>
-                {points_cards(standings)}
+                {points_tables(standings)}
             </section>
 
             <section id="scorers" class="section">
                 <h2 class="section-title">🥅 Top Scorers</h2>
-                {scorer_cards(scorers)}
-            </section>
-
-            <section id="goals" class="section">
-                <h2 class="section-title">⚽ Goal Scorers by Match</h2>
-                {match_cards(completed_matches, True, False, False, True)}
+                {scorer_cards(top_scorers)}
             </section>
 
             <section id="players" class="section">
                 <h2 class="section-title">👥 Players List</h2>
-                {player_cards(squads)}
+                {player_dropdown_html(squads)}
             </section>
         </main>
     </body>
@@ -849,7 +877,7 @@ def api_standings():
 
 @app.route("/api/top-scorers")
 def api_top_scorers():
-    return jsonify(build_top_scorers(get_matches()))
+    return jsonify(build_top_scorers(get_matches())[:10])
 
 
 @app.route("/api/squads")
