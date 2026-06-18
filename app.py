@@ -63,7 +63,7 @@ def build_points_table(matches):
         team1 = match.get("team1", "")
         team2 = match.get("team2", "")
 
-        if not group or not team1 or not team2:
+        if not team1 or not team2:
             continue
 
         score = match["score"]["ft"]
@@ -74,7 +74,8 @@ def build_points_table(matches):
             standings[group] = {}
 
         for team in [team1, team2]:
-            if team not in standingsstandings[group][team] = {
+            if team not in standings[group]:
+                standings[group][team] = {
                     "team": team,
                     "played": 0,
                     "won": 0,
@@ -170,21 +171,22 @@ def world_cup_tracker():
         <h3 class="group-title">{escape(group)}</h3>
         <table>
             <tr>
-                <th>Position</th>
+                <th>Pos</th>
                 <th>Team</th>
-                <th>Played</th>
-                <th>Won</th>
-                <th>Drawn</th>
-                <th>Lost</th>
+                <th>P</th>
+                <th>W</th>
+                <th>D</th>
+                <th>L</th>
                 <th>GF</th>
                 <th>GA</th>
                 <th>GD</th>
-                <th>Points</th>
+                <th>Pts</th>
             </tr>
         """
 
         position = 1
-        for team in standingspoints_html += f"""
+        for team in standings[group]:
+            points_html += f"""
             <tr>
                 <td>{position}</td>
                 <td>{escape(team["team"])}</td>
@@ -241,10 +243,12 @@ def world_cup_tracker():
                 display: flex;
                 gap: 20px;
                 margin-bottom: 25px;
+                flex-wrap: wrap;
             }}
 
             .card {{
                 flex: 1;
+                min-width: 180px;
                 background: white;
                 padding: 20px;
                 border-radius: 12px;
