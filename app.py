@@ -10,32 +10,30 @@ MATCHES_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/mast
 SQUADS_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.squads.json"
 IST = timezone(timedelta(hours=5, minutes=30))
 
-FLAGS = {
-    "Argentina": "🇦🇷", "Australia": "🇦🇺", "Austria": "🇦🇹", "Belgium": "🇧🇪",
-    "Brazil": "🇧🇷", "Canada": "🇨🇦", "Colombia": "🇨🇴", "Croatia": "🇭🇷",
-    "Czech Republic": "🇨🇿", "Czechia": "🇨🇿", "Ecuador": "🇪🇨", "Egypt": "🇪🇬",
-    "England": "🏴", "France": "🇫🇷", "Germany": "🇩🇪", "Ghana": "🇬🇭",
-    "Haiti": "🇭🇹", "Iraq": "🇮🇶", "IR Iran": "🇮🇷", "Iran": "🇮🇷",
-    "Japan": "🇯🇵", "Mexico": "🇲🇽", "Morocco": "🇲🇦", "Netherlands": "🇳🇱",
-    "New Zealand": "🇳🇿", "Norway": "🇳🇴", "Panama": "🇵🇦", "Paraguay": "🇵🇾",
-    "Portugal": "🇵🇹", "Qatar": "🇶🇦", "Saudi Arabia": "🇸🇦", "Scotland": "🏴",
-    "Senegal": "🇸🇳", "South Africa": "🇿🇦", "South Korea": "🇰🇷",
-    "Korea Republic": "🇰🇷", "Spain": "🇪🇸", "Sweden": "🇸🇪",
-    "Switzerland": "🇨🇭", "Tunisia": "🇹🇳", "Türkiye": "🇹🇷", "Turkiye": "🇹🇷",
-    "USA": "🇺🇸", "United States": "🇺🇸", "Uruguay": "🇺🇾", "Uzbekistan": "🇺🇿",
-    "Bosnia & Herzegovina": "🇧🇦", "Bosnia and Herzegovina": "🇧🇦",
-    "Cabo Verde": "🇨🇻", "Cape Verde": "🇨🇻", "Congo DR": "🇨🇩",
-    "DR Congo": "🇨🇩", "Curaçao": "🇨🇼", "Ivory Coast": "🇨🇮",
-    "Côte d'Ivoire": "🇨🇮", "Jordan": "🇯🇴"
+COUNTRY_CODES = {
+    "Argentina": "ar", "Australia": "au", "Austria": "at", "Belgium": "be", "Brazil": "br", "Canada": "ca",
+    "Colombia": "co", "Croatia": "hr", "Czech Republic": "cz", "Czechia": "cz", "Ecuador": "ec", "Egypt": "eg",
+    "England": "gb-eng", "France": "fr", "Germany": "de", "Ghana": "gh", "Haiti": "ht", "Iraq": "iq",
+    "IR Iran": "ir", "Iran": "ir", "Japan": "jp", "Mexico": "mx", "Morocco": "ma", "Netherlands": "nl",
+    "New Zealand": "nz", "Norway": "no", "Panama": "pa", "Paraguay": "py", "Portugal": "pt", "Qatar": "qa",
+    "Saudi Arabia": "sa", "Scotland": "gb-sct", "Senegal": "sn", "South Africa": "za", "South Korea": "kr",
+    "Korea Republic": "kr", "Spain": "es", "Sweden": "se", "Switzerland": "ch", "Tunisia": "tn",
+    "Türkiye": "tr", "Turkiye": "tr", "USA": "us", "United States": "us", "Uruguay": "uy", "Uzbekistan": "uz",
+    "Bosnia & Herzegovina": "ba", "Bosnia and Herzegovina": "ba", "Cabo Verde": "cv", "Cape Verde": "cv",
+    "Congo DR": "cd", "DR Congo": "cd", "Curaçao": "cw", "Curacao": "cw", "Ivory Coast": "ci",
+    "Côte d'Ivoire": "ci", "Jordan": "jo", "Algeria": "dz"
 }
 
 
-def flag(team):
-    return FLAGS.get(team, "🏳️")
+def flag_image(team):
+    code = COUNTRY_CODES.get(team)
+    if not code:
+        return ""
+    return f'https://flagcdn.com/24x18/{code}.png flag" loading="lazy">'
 
 
 def team_label(team):
-    return f"{flag(team)} {team}"
+    return f'{flag_image(team)}<span>{escape(team)}</span>'
 
 
 def fetch_json(url):
@@ -91,11 +89,7 @@ def match_sort_key(match):
 
 def ist_text(match):
     dt = match_ist_datetime(match)
-
-    if not dt:
-        return "TBA"
-
-    return dt.strftime("%d %b %Y, %I:%M %p IST")
+    return dt.strftime("%d %b %Y, %I:%M %p IST") if dt else "TBA"
 
 
 def ist_date(match):
@@ -298,9 +292,9 @@ def match_cards(matches, show_score=False, show_round=False, show_status=False, 
         <div class="match-card" data-search="{escape(search_text)}">
             <div class="match-top">
                 <div class="match-teams">
-                    {escape(team_label(team1))}
+                    {team_label(team1)}
                     <br><small>vs</small><br>
-                    {escape(team_label(team2))}
+                    {team_label(team2)}
                 </div>
                 {score_html}
             </div>
@@ -334,7 +328,7 @@ def scorer_cards(scorers):
             <div class="rank">#{rank}</div>
             <div>
                 <b>{escape(scorer['player'])}</b>
-                <span>{escape(team_label(scorer['team']))}</span>
+                <span>{team_label(scorer['team'])}</span>
             </div>
             <div class="score-pill">{scorer['goals']}</div>
         </div>
@@ -356,7 +350,7 @@ def points_cards(standings):
             html += f"""
             <div class="points-card" data-search="{escape(search_text)}">
                 <div>
-                    <b>{pos}. {escape(team_label(team_name))}</b>
+                    <b>{pos}. {team_label(team_name)}</b>
                     <span>P {team['played']} | W {team['won']} | D {team['drawn']} | L {team['lost']}</span>
                 </div>
                 <div>
@@ -376,7 +370,7 @@ def player_cards(squads):
     html = ""
 
     for team in sorted(squads.keys()):
-        html += f"<h3 class='group-title'>{escape(team_label(team))}</h3>"
+        html += f"<h3 class='group-title'>{team_label(team)}</h3>"
 
         for player in squadssearch_text = f"{player.get('name', '')} {player.get('position', '')} {team}".lower()
             number = player.get("number", "")
@@ -389,7 +383,7 @@ def player_cards(squads):
                     <b>{escape(player.get('name', ''))}</b>
                     <span>{escape(position)}</span>
                 </div>
-                <div>{escape(flag(team))}</div>
+                <div>{flag_image(team)}</div>
             </div>
             """
 
@@ -425,11 +419,11 @@ def world_cup_2026():
 
     next_text = "No upcoming match"
     if next_match:
-        next_text = f"{team_label(next_match.get('team1', ''))} vs {team_label(next_match.get('team2', ''))} • {ist_text(next_match)}"
+        next_text = f"{next_match.get('team1', '')} vs {next_match.get('team2', '')} • {ist_text(next_match)}"
 
     latest_text = "No completed result"
     if latest_result:
-        latest_text = f"{team_label(latest_result.get('team1', ''))} {score_text(latest_result)} {team_label(latest_result.get('team2', ''))}"
+        latest_text = f"{latest_result.get('team1', '')} {score_text(latest_result)} {latest_result.get('team2', '')}"
 
     return f"""
     <!DOCTYPE html>
@@ -696,6 +690,16 @@ def world_cup_2026():
             .group-title {{
                 color: #075985;
                 margin: 18px 0 10px;
+            }}
+
+            .team-flag {{
+                width: 24px;
+                height: 18px;
+                object-fit: cover;
+                border-radius: 3px;
+                margin-right: 7px;
+                vertical-align: middle;
+                box-shadow: 0 1px 3px rgba(0,0,0,.18);
             }}
 
             @media (min-width: 800px) {{
