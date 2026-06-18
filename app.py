@@ -10,6 +10,28 @@ MATCHES_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/mast
 SQUADS_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.squads.json"
 IST = timezone(timedelta(hours=5, minutes=30))
 
+FLAGS = {
+    "Argentina": "🇦🇷", "Australia": "🇦🇺", "Austria": "🇦🇹", "Belgium": "🇧🇪",
+    "Bosnia & Herzegovina": "🇧🇦", "Bosnia and Herzegovina": "🇧🇦", "Brazil": "🇧🇷",
+    "Canada": "🇨🇦", "Cabo Verde": "🇨🇻", "Cape Verde": "🇨🇻", "Colombia": "🇨🇴",
+    "Congo DR": "🇨🇩", "DR Congo": "🇨🇩", "Croatia": "🇭🇷", "Curaçao": "🇨🇼",
+    "Czech Republic": "🇨🇿", "Czechia": "🇨🇿", "Ecuador": "🇪🇨", "Egypt": "🇪🇬",
+    "England": "🏴", "France": "🇫🇷", "Germany": "🇩🇪", "Ghana": "🇬🇭",
+    "Haiti": "🇭🇹", "IR Iran": "🇮🇷", "Iran": "🇮🇷", "Iraq": "🇮🇶",
+    "Ivory Coast": "🇨🇮", "Côte d'Ivoire": "🇨🇮", "Japan": "🇯🇵", "Jordan": "🇯🇴",
+    "Mexico": "🇲🇽", "Morocco": "🇲🇦", "Netherlands": "🇳🇱", "New Zealand": "🇳🇿",
+    "Norway": "🇳🇴", "Panama": "🇵🇦", "Paraguay": "🇵🇾", "Portugal": "🇵🇹",
+    "Qatar": "🇶🇦", "Saudi Arabia": "🇸🇦", "Scotland": "🏴", "Senegal": "🇸🇳",
+    "South Africa": "🇿🇦", "South Korea": "🇰🇷", "Korea Republic": "🇰🇷",
+    "Spain": "🇪🇸", "Sweden": "🇸🇪", "Switzerland": "🇨🇭", "Tunisia": "🇹🇳",
+    "Türkiye": "🇹🇷", "Turkiye": "🇹🇷", "USA": "🇺🇸", "United States": "🇺🇸",
+    "Uruguay": "🇺🇾", "Uzbekistan": "🇺🇿"
+}
+
+
+def flag(team):
+    return FLAGS.get(team, "🏳️")
+
 
 def fetch_json(url):
     try:
@@ -40,6 +62,10 @@ def score_text(match):
     return "Upcoming"
 
 
+def team_label(team):
+    return f"{flag(team)} {team}"
+
+
 def match_ist_datetime(match):
     try:
         date_text = match.get("date", "")
@@ -53,7 +79,6 @@ def match_ist_datetime(match):
         source_tz = timezone(timedelta(hours=int(offset_part)))
 
         return source_dt.replace(tzinfo=source_tz).astimezone(IST)
-
     except Exception:
         return None
 
@@ -64,10 +89,8 @@ def match_sort_key(match):
 
 def ist_text(match):
     dt = match_ist_datetime(match)
-
     if not dt:
         return match.get("time", "TBA") or "TBA"
-
     return dt.strftime("%d %b %Y, %I:%M %p IST")
 
 
@@ -87,20 +110,22 @@ def build_points_table(matches):
         if not group or "Group" not in group or not team1 or not team2:
             continue
 
-        table.setdefault(group, {})
+        if group not in table:
+            table[group] = {}
 
         for team in [team1, team2]:
-            table[group].setdefault(team, {
-                "team": team,
-                "played": 0,
-                "won": 0,
-                "drawn": 0,
-                "lost": 0,
-                "gf": 0,
-                "ga": 0,
-                "gd": 0,
-                "points": 0
-            })
+            if team not in table[group]:
+                table[group][team] = {
+                    "team": team,
+                    "played": 0,
+                    "won": 0,
+                    "drawn": 0,
+                    "lost": 0,
+                    "gf": 0,
+                    "ga": 0,
+                    "gd": 0,
+                    "points": 0
+                }
 
     for match in matches:
         if not completed(match):
@@ -114,7 +139,8 @@ def build_points_table(matches):
             continue
 
         goals1, goals2 = match["score"]["ft"]
-        goals1, goals2 = int(goals1), int(goals2)
+        goals1 = int(goals1)
+        goals2 = int(goals2)
 
         table[group][team1]["played"] += 1
         table[group][team2]["played"] += 1
@@ -163,11 +189,12 @@ def build_top_scorers(matches):
                 player = goal.get("name", "Unknown")
                 key = f"{player}|{team}"
 
-                scorers.setdefault(key, {
-                    "player": player,
-                    "team": team,
-                    "goals": 0
-                })
+                if key not in scorers:
+                    scorers[key] = {
+                        "player": player,
+                        "team": team,
+                        "goals": 0
+                    }
 
                 scorers[key]["goals"] += 1
 
@@ -176,6 +203,21 @@ def build_top_scorers(matches):
         key=lambda x: (x["goals"], x["player"]),
         reverse=True
     )
+
+
+def goal_scorer_text(match):
+    parts = []
+
+    for goals_key, team_key in [("goals1", "team1"), ("goals2", "team2")]:
+        team = match.get(team_key, "")
+
+        for goal in match.get(goals_key, []):
+            name = goal.get("name", "Unknown")
+            minute = goal.get("minute", "")
+            penalty = " pen" if goal.get("penalty") else ""
+            parts.append(f"{name} ({team}, {minute}'{penalty})")
+
+    return "; ".join(parts) if parts else "Goal scorer details not available"
 
 
 def normalize_squads(raw):
@@ -202,626 +244,3 @@ def normalize_squads(raw):
             or item.get("name")
             or item.get("title")
             or item.get("team_name")
-            or "Unknown Team"
-        )
-
-        players = item.get("players") or item.get("squad") or item.get("roster") or []
-        normalized = []
-
-        if isinstance(players, list):
-            for player in players:
-                if isinstance(player, str):
-                    normalized.append({
-                        "name": player,
-                        "number": "",
-                        "position": ""
-                    })
-                elif isinstance(player, dict):
-                    normalized.append({
-                        "name": player.get("name") or player.get("player") or "Unknown",
-                        "number": player.get("number") or player.get("no") or "",
-                        "position": player.get("position") or player.get("pos") or ""
-                    })
-
-        squads[team] = normalized
-
-    return squads
-
-
-def rows_for_matches(matches, score=False, round_col=False, status=False):
-    rows = ""
-
-    for match in matches:
-        match_text = f"{match.get('team1', '')} vs {match.get('team2', '')}"
-        search_text = f"{match.get('team1', '')} {match.get('team2', '')} {match.get('group', '')}".lower()
-
-        rows += f"""
-        <tr data-search="{escape(search_text)}">
-            {f"<td>{escape(match.get('round', ''))}</td>" if round_col else ""}
-            <td>{escape(match.get('date', ''))}</td>
-            <td>{escape(ist_text(match))}</td>
-            <td><span class="badge blue">{escape(match.get('group', ''))}</span></td>
-            <td class="match-name">{escape(match_text)}</td>
-            {f"<td><span class='badge green'>{escape(score_text(match))}</span></td>" if score else ""}
-            {f"<td>{'Completed' if completed(match) else 'Upcoming'}</td>" if status else ""}
-            <td>{escape(match.get('ground', ''))}</td>
-        </tr>
-        """
-
-    return rows
-
-
-@app.route("/")
-def home():
-    return world_cup_2026()
-
-
-@app.route("/world-cup-2026")
-def world_cup_2026():
-    matches = get_matches()
-
-    all_matches = sorted(matches, key=match_sort_key)
-    done_matches = sorted([m for m in matches if completed(m)], key=match_sort_key)
-    upcoming_matches = sorted([m for m in matches if not completed(m)], key=match_sort_key)
-
-    today = datetime.now(IST).date()
-    tomorrow = today + timedelta(days=1)
-
-    today_matches = [m for m in all_matches if ist_date(m) == today]
-    tomorrow_matches = [m for m in all_matches if ist_date(m) == tomorrow]
-
-    standings = build_points_table(matches)
-    scorers = build_top_scorers(matches)
-    squads = normalize_squads(get_squads_raw())
-
-    today_rows = rows_for_matches(today_matches, score=True)
-    tomorrow_rows = rows_for_matches(tomorrow_matches, score=True)
-    completed_rows = rows_for_matches(done_matches, score=True)
-    upcoming_rows = rows_for_matches(upcoming_matches)
-    fixtures_rows = rows_for_matches(all_matches, score=True, round_col=True, status=True)
-
-    points_html = ""
-
-    for group in sorted(standings.keys()):
-        points_html += f"""
-        <h3 class="group-title">{escape(group)}</h3>
-        <div class="table-wrap">
-            <table>
-                <tr>
-                    <th>Pos</th>
-                    <th>Team</th>
-                    <th>P</th>
-                    <th>W</th>
-                    <th>D</th>
-                    <th>L</th>
-                    <th>GF</th>
-                    <th>GA</th>
-                    <th>GD</th>
-                    <th>Pts</th>
-                </tr>
-        """
-
-        for pos, team in enumerate(standings[group], start=1):
-            points_html += f"""
-            <tr>
-                <td>{pos}</td>
-                <td>{escape(team['team'])}</td>
-                <td>{team['played']}</td>
-                <td>{team['won']}</td>
-                <td>{team['drawn']}</td>
-                <td>{team['lost']}</td>
-                <td>{team['gf']}</td>
-                <td>{team['ga']}</td>
-                <td>{team['gd']}</td>
-                <td><span class="badge gold">{team['points']}</span></td>
-            </tr>
-            """
-
-        points_html += """
-            </table>
-        </div>
-        """
-
-    scorers_rows = ""
-
-    for rank, scorer in enumerate(scorers, start=1):
-        scorers_rows += f"""
-        <tr>
-            <td>{rank}</td>
-            <td>{escape(scorer['player'])}</td>
-            <td>{escape(scorer['team'])}</td>
-            <td><span class="badge green">{scorer['goals']}</span></td>
-        </tr>
-        """
-
-    if not scorers_rows:
-        scorers_rows = """
-        <tr>
-            <td colspan="4">No goal scorer data available yet.</td>
-        </tr>
-        """
-
-    players_html = ""
-
-    if squads:
-        for team in sorted(squads.keys()):
-            players_html += f"""
-            <h3 class="group-title">{escape(team)}</h3>
-            <div class="table-wrap">
-                <table>
-                    <tr>
-                        <th>No</th>
-                        <th>Player</th>
-                        <th>Position</th>
-                    </tr>
-            """
-
-            for player in squads[team]:
-                players_html += f"""
-                <tr>
-                    <td>{escape(str(player.get('number', '')))}</td>
-                    <td>{escape(player.get('name', ''))}</td>
-                    <td>{escape(player.get('position', ''))}</td>
-                </tr>
-                """
-
-            players_html += """
-                </table>
-            </div>
-            """
-    else:
-        players_html = """
-        <div class="empty">
-            Player squad data is not available from the free source currently.
-        </div>
-        """
-
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>FIFA World Cup 2026 Tracker</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-
-        <style>
-            * {{
-                box-sizing: border-box;
-            }}
-
-            body {{
-                margin: 0;
-                font-family: Arial, sans-serif;
-                background: #eef4fb;
-                color: #0f172a;
-            }}
-
-            .hero {{
-                background: linear-gradient(135deg, #071b3a, #0057a8, #00a86b);
-                color: white;
-                padding: 34px 22px 44px;
-            }}
-
-            .hero-inner {{
-                max-width: 1180px;
-                margin: auto;
-                display: flex;
-                justify-content: space-between;
-                gap: 20px;
-                align-items: center;
-                flex-wrap: wrap;
-            }}
-
-            .hero h1 {{
-                margin: 0;
-                font-size: 38px;
-                letter-spacing: .2px;
-            }}
-
-            .hero p {{
-                margin: 10px 0 0;
-                opacity: .92;
-            }}
-
-            .live-pill {{
-                background: rgba(255,255,255,.16);
-                border: 1px solid rgba(255,255,255,.35);
-                padding: 10px 16px;
-                border-radius: 999px;
-                font-weight: 700;
-            }}
-
-            .container {{
-                max-width: 1180px;
-                margin: -28px auto 30px;
-                padding: 0 18px;
-            }}
-
-            .cards {{
-                display: grid;
-                grid-template-columns: repeat(4, 1fr);
-                gap: 16px;
-            }}
-
-            .card {{
-                background: white;
-                border-radius: 18px;
-                padding: 20px;
-                box-shadow: 0 12px 28px rgba(15,23,42,.09);
-            }}
-
-            .card .num {{
-                font-size: 34px;
-                font-weight: 800;
-                color: #0057a8;
-            }}
-
-            .card .label {{
-                color: #64748b;
-                margin-top: 3px;
-            }}
-
-            .toolbar {{
-                margin: 18px 0;
-                background: white;
-                border-radius: 18px;
-                padding: 14px;
-                box-shadow: 0 12px 28px rgba(15,23,42,.07);
-            }}
-
-            .tabs {{
-                display: flex;
-                gap: 10px;
-                flex-wrap: wrap;
-            }}
-
-            button {{
-                border: 0;
-                cursor: pointer;
-            }}
-
-            .tab {{
-                background: #e6eef8;
-                color: #0f3764;
-                padding: 12px 16px;
-                border-radius: 999px;
-                font-weight: 800;
-            }}
-
-            .tab.active {{
-                background: #00a86b;
-                color: white;
-            }}
-
-            .search {{
-                margin-top: 14px;
-                width: 100%;
-                padding: 14px 16px;
-                border-radius: 14px;
-                border: 1px solid #d8e2ee;
-                font-size: 15px;
-            }}
-
-            .section {{
-                display: none;
-                background: white;
-                border-radius: 20px;
-                padding: 18px;
-                box-shadow: 0 12px 28px rgba(15,23,42,.07);
-                margin-bottom: 22px;
-            }}
-
-            .section.active {{
-                display: block;
-            }}
-
-            .section h2 {{
-                margin: 0 0 14px;
-                color: #082f5f;
-            }}
-
-            .table-wrap {{
-                overflow-x: auto;
-            }}
-
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                min-width: 760px;
-            }}
-
-            th {{
-                background: #082f5f;
-                color: white;
-                text-align: left;
-                padding: 13px;
-            }}
-
-            td {{
-                padding: 13px;
-                border-bottom: 1px solid #e8eef5;
-            }}
-
-            tr:hover {{
-                background: #f6fbff;
-            }}
-
-            .badge {{
-                display: inline-block;
-                padding: 6px 10px;
-                border-radius: 999px;
-                font-weight: 800;
-                font-size: 12px;
-            }}
-
-            .blue {{
-                background: #dff1ff;
-                color: #075985;
-            }}
-
-            .green {{
-                background: #dcfce7;
-                color: #166534;
-            }}
-
-            .gold {{
-                background: #fef3c7;
-                color: #92400e;
-            }}
-
-            .match-name {{
-                font-weight: 750;
-            }}
-
-            .group-title {{
-                color: #075985;
-                margin: 20px 0 10px;
-            }}
-
-            .empty {{
-                padding: 20px;
-                background: #f8fafc;
-                border-radius: 14px;
-                color: #64748b;
-            }}
-
-            .footer {{
-                text-align: center;
-                color: #64748b;
-                padding: 25px;
-            }}
-
-            @media (max-width: 850px) {{
-                .cards {{
-                    grid-template-columns: repeat(2, 1fr);
-                }}
-
-                .hero h1 {{
-                    font-size: 30px;
-                }}
-            }}
-
-            @media (max-width: 520px) {{
-                .cards {{
-                    grid-template-columns: 1fr;
-                }}
-
-                .tab {{
-                    width: 100%;
-                }}
-            }}
-        </style>
-
-        <script>
-            function showSection(sectionId, buttonId) {{
-                document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-                document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-
-                document.getElementById(sectionId).classList.add('active');
-                document.getElementById(buttonId).classList.add('active');
-            }}
-
-            function filterRows() {{
-                const value = document.getElementById('teamSearch').value.toLowerCase();
-
-                document.querySelectorAll('tr[data-search]').forEach(row => {{
-                    row.style.display = row.getAttribute('data-search').includes(value) ? '' : 'none';
-                }});
-            }}
-        </script>
-    </head>
-
-    <body>
-        <div class="hero">
-            <div class="hero-inner">
-                <div>
-                    <h1>FIFA World Cup 2026 Tracker</h1>
-                    <p>Fixtures, results, Indian time, points table, top scorers and squads</p>
-                </div>
-
-                <div class="live-pill">
-                    Updated from online JSON source
-                </div>
-            </div>
-        </div>
-
-        <main class="container">
-
-            <div class="cards">
-                <div class="card">
-                    <div class="num">{len(matches)}</div>
-                    <div class="label">Total Fixtures</div>
-                </div>
-
-                <div class="card">
-                    <div class="num">{len(done_matches)}</div>
-                    <div class="label">Completed</div>
-                </div>
-
-                <div class="card">
-                    <div class="num">{len(upcoming_matches)}</div>
-                    <div class="label">Upcoming</div>
-                </div>
-
-                <div class="card">
-                    <div class="num">{len(today_matches)}</div>
-                    <div class="label">Today in IST</div>
-                </div>
-            </div>
-
-            <div class="toolbar">
-                <div class="tabs">
-                    <button id="today-btn" class="tab active" onclick="showSection('today-section','today-btn')">Today’s Matches</button>
-                    <button id="tomorrow-btn" class="tab" onclick="showSection('tomorrow-section','tomorrow-btn')">Tomorrow</button>
-                    <button id="completed-btn" class="tab" onclick="showSection('completed-section','completed-btn')">Completed</button>
-                    <button id="upcoming-btn" class="tab" onclick="showSection('upcoming-section','upcoming-btn')">Upcoming</button>
-                    <button id="fixtures-btn" class="tab" onclick="showSection('fixtures-section','fixtures-btn')">All Fixtures</button>
-                    <button id="points-btn" class="tab" onclick="showSection('points-section','points-btn')">Points Table</button>
-                    <button id="scorers-btn" class="tab" onclick="showSection('scorers-section','scorers-btn')">Top Scorers</button>
-                    <button id="players-btn" class="tab" onclick="showSection('players-section','players-btn')">Players List</button>
-                </div>
-
-                <input id="teamSearch" onkeyup="filterRows()" class="search" placeholder="Search team or group, e.g. Brazil, Argentina, Group A">
-            </div>
-
-            <section id="today-section" class="section active">
-                <h2>Today’s Matches</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr>
-                            <th>Date</th>
-                            <th>Indian Time</th>
-                            <th>Group/Round</th>
-                            <th>Match</th>
-                            <th>Score/Status</th>
-                            <th>Venue</th>
-                        </tr>
-                        {today_rows}
-                    </table>
-                </div>
-            </section>
-
-            <section id="tomorrow-section" class="section">
-                <h2>Tomorrow’s Matches</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr>
-                            <th>Date</th>
-                            <th>Indian Time</th>
-                            <th>Group/Round</th>
-                            <th>Match</th>
-                            <th>Score/Status</th>
-                            <th>Venue</th>
-                        </tr>
-                        {tomorrow_rows}
-                    </table>
-                </div>
-            </section>
-
-            <section id="completed-section" class="section">
-                <h2>Completed Matches</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr>
-                            <th>Date</th>
-                            <th>Indian Time</th>
-                            <th>Group/Round</th>
-                            <th>Match</th>
-                            <th>Score</th>
-                            <th>Venue</th>
-                        </tr>
-                        {completed_rows}
-                    </table>
-                </div>
-            </section>
-
-            <section id="upcoming-section" class="section">
-                <h2>Upcoming Matches</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr>
-                            <th>Date</th>
-                            <th>Indian Time</th>
-                            <th>Group/Round</th>
-                            <th>Match</th>
-                            <th>Venue</th>
-                        </tr>
-                        {upcoming_rows}
-                    </table>
-                </div>
-            </section>
-
-            <section id="fixtures-section" class="section">
-                <h2>All Fixtures Till Final</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr>
-                            <th>Round</th>
-                            <th>Date</th>
-                            <th>Indian Time</th>
-                            <th>Group/Round</th>
-                            <th>Match</th>
-                            <th>Score/Status</th>
-                            <th>Status</th>
-                            <th>Venue</th>
-                        </tr>
-                        {fixtures_rows}
-                    </table>
-                </div>
-            </section>
-
-            <section id="points-section" class="section">
-                <h2>Points Table</h2>
-                {points_html}
-            </section>
-
-            <section id="scorers-section" class="section">
-                <h2>Top Scorers</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr>
-                            <th>Rank</th>
-                            <th>Player</th>
-                            <th>Team</th>
-                            <th>Goals</th>
-                        </tr>
-                        {scorers_rows}
-                    </table>
-                </div>
-            </section>
-
-            <section id="players-section" class="section">
-                <h2>Players List</h2>
-                {players_html}
-            </section>
-
-            <div class="footer">
-                Data source: OpenFootball World Cup 2026 JSON. Time converted to Indian Standard Time.
-            </div>
-        </main>
-    </body>
-    </html>
-    """
-
-
-@app.route("/api/matches")
-def api_matches():
-    return jsonify(get_matches())
-
-
-@app.route("/api/standings")
-def api_standings():
-    return jsonify(build_points_table(get_matches()))
-
-
-@app.route("/api/top-scorers")
-def api_top_scorers():
-    return jsonify(build_top_scorers(get_matches()))
-
-
-@app.route("/api/squads")
-def api_squads():
-    return jsonify(normalize_squads(get_squads_raw()))
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
